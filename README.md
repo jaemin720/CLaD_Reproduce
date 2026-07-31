@@ -62,6 +62,9 @@ pip install -e ".[dev,train]"
 
 LIBERO remains an external environment dependency. DecisionNCE is pinned as a
 Git submodule so its source revision and MIT license are preserved explicitly.
+The environment pins `setuptools=80.9.0` because DecisionNCE's `openai-clip`
+dependency imports the legacy `pkg_resources` module, which was removed in
+setuptools 81.
 If this repository was cloned without submodules, initialize it first:
 
 ```bash

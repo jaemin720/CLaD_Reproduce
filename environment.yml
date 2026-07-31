@@ -6,6 +6,10 @@ channels:
 dependencies:
   - python=3.10
   - pip
+  # openai-clip (used by DecisionNCE) still imports pkg_resources.
+  # setuptools 81+ removed that module. Pin the last 80.x release so
+  # environment resolution cannot silently select an incompatible version.
+  - setuptools=80.9.0
   - pytorch=2.2
   - torchvision=0.17
   - pytorch-cuda=12.1

@@ -15,7 +15,6 @@ from typing import Any
 import torch
 from torch import nn
 
-
 OFFICIAL_DECISIONNCE_REVISION = "ebdc585c5e6833ec3a2ba77f801b15c74d7a28f8"
 
 
@@ -70,6 +69,11 @@ class DecisionNCEAdapter(nn.Module):
         try:
             package = importlib.import_module("DecisionNCE")
         except ModuleNotFoundError as error:
+            # Do not disguise a missing transitive dependency (for example,
+            # openai-clip's pkg_resources dependency) as a missing DecisionNCE
+            # installation.
+            if error.name != "DecisionNCE":
+                raise
             raise ModuleNotFoundError(
                 "DecisionNCE is not installed. Clone "
                 "https://github.com/2toinf/DecisionNCE and install it with "
@@ -181,4 +185,3 @@ class DecisionNCEAdapter(nn.Module):
             view_name: self.encode_images(images)
             for view_name, images in images_by_view.items()
         }
-

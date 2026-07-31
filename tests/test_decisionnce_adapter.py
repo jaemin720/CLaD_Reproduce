@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+
 import pytest
 import torch
 
@@ -68,3 +70,36 @@ def test_adapter_rejects_invalid_image_shapes(images: torch.Tensor) -> None:
     with pytest.raises(ValueError, match="images must"):
         adapter.encode_images(images)
 
+
+def test_from_pretrained_preserves_transitive_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing_dependency = ModuleNotFoundError(
+        "No module named 'pkg_resources'",
+        name="pkg_resources",
+    )
+
+    def fail_import(_: str) -> None:
+        raise missing_dependency
+
+    monkeypatch.setattr(importlib, "import_module", fail_import)
+
+    with pytest.raises(ModuleNotFoundError) as captured:
+        DecisionNCEAdapter.from_pretrained(DecisionNCEAdapterConfig(device="cpu"))
+
+    assert captured.value is missing_dependency
+
+
+def test_from_pretrained_explains_missing_decisionnce(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_import(_: str) -> None:
+        raise ModuleNotFoundError(
+            "No module named 'DecisionNCE'",
+            name="DecisionNCE",
+        )
+
+    monkeypatch.setattr(importlib, "import_module", fail_import)
+
+    with pytest.raises(ModuleNotFoundError, match="DecisionNCE is not installed"):
+        DecisionNCEAdapter.from_pretrained(DecisionNCEAdapterConfig(device="cpu"))

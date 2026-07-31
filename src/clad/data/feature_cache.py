@@ -23,7 +23,6 @@ from clad.data.camera import camera_view_name, normalize_camera_keys
 from clad.data.task_registry import LiberoTask, discover_libero_tasks, list_demo_keys
 from clad.models.decisionnce_adapter import DecisionNCEAdapter
 
-
 CACHE_SCHEMA_VERSION = 1
 MANIFEST_NAME = "manifest.json"
 
