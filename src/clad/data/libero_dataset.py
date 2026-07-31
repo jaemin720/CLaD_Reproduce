@@ -19,12 +19,45 @@ from clad.data.task_registry import LiberoTask, discover_libero_tasks, list_demo
 class LiberoDatasetConfig:
     dataset_dir: str | Path
     file_pattern: str = "*_demo.hdf5"
-    camera_key: str = "obs/agentview_rgb"
+    camera_keys: tuple[str, ...] = ("obs/agentview_rgb",)
     proprio_key: str = "robot_states"
     action_key: str = "actions"
     horizon: int = 6
     include_images: bool = True
     strict: bool = True
+
+    def __post_init__(self) -> None:
+        if isinstance(self.camera_keys, str):
+            raise TypeError(
+                "camera_keys must be a sequence of HDF5 paths, not a single string"
+            )
+
+        # Hydra/OmegaConf commonly constructs this field from a YAML list.
+        # Normalize it once so the rest of the data pipeline has an immutable
+        # and hashable camera specification.
+        camera_keys = tuple(self.camera_keys)
+        object.__setattr__(self, "camera_keys", camera_keys)
+
+        if self.include_images and not camera_keys:
+            raise ValueError("camera_keys cannot be empty when include_images=True")
+        if len(set(camera_keys)) != len(camera_keys):
+            raise ValueError(f"camera_keys contains duplicate paths: {camera_keys}")
+
+        view_names = tuple(_camera_view_name(key) for key in camera_keys)
+        if len(set(view_names)) != len(view_names):
+            raise ValueError(
+                "Each camera path must have a unique final component; "
+                f"got view names {view_names}"
+            )
+
+
+def _camera_view_name(camera_key: str) -> str:
+    """Convert ``obs/agentview_rgb`` into the stable view id ``agentview_rgb``."""
+
+    normalized = camera_key.rstrip("/")
+    if not normalized:
+        raise ValueError("camera keys cannot be empty")
+    return normalized.rsplit("/", maxsplit=1)[-1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +93,7 @@ class LiberoWindowDataset(Dataset[dict[str, Any]]):
     def _index_dataset(self) -> None:
         required_keys = [self.config.proprio_key, self.config.action_key]
         if self.config.include_images:
-            required_keys.append(self.config.camera_key)
+            required_keys.extend(self.config.camera_keys)
 
         for task_index, task in enumerate(self.tasks):
             with h5py.File(task.path, "r") as handle:
@@ -92,6 +125,22 @@ class LiberoWindowDataset(Dataset[dict[str, Any]]):
                                 f"Temporal length mismatch at {task.path}:{demo_key}/{key}: "
                                 f"{dataset.shape[0]} != {length}"
                             )
+
+                    proprio_dataset = demo_group[self.config.proprio_key]
+                    if proprio_dataset.ndim != 2:
+                        raise ValueError(
+                            f"Proprioception must have shape [T, Dp], got "
+                            f"{proprio_dataset.shape} in {task.path}:{demo_key}"
+                        )
+
+                    if self.config.include_images:
+                        for camera_key in self.config.camera_keys:
+                            image_dataset = demo_group[camera_key]
+                            if image_dataset.ndim != 4 or image_dataset.shape[-1] != 3:
+                                raise ValueError(
+                                    f"Camera {camera_key!r} must have shape [T, H, W, 3], "
+                                    f"got {image_dataset.shape} in {task.path}:{demo_key}"
+                                )
 
                     episode_indices = build_window_indices(
                         task_index=task_index,
@@ -159,14 +208,14 @@ class LiberoWindowDataset(Dataset[dict[str, Any]]):
         }
 
         if self.config.include_images:
-            images = demo_group[self.config.camera_key]
-            sample.update(
-                {
-                    "image_prev": self._image_tensor(images, t - tau),
-                    "image_now": self._image_tensor(images, t),
-                    "image_future": self._image_tensor(images, t + tau),
+            sample["images"] = {
+                _camera_view_name(camera_key): {
+                    "prev": self._image_tensor(demo_group[camera_key], t - tau),
+                    "now": self._image_tensor(demo_group[camera_key], t),
+                    "future": self._image_tensor(demo_group[camera_key], t + tau),
                 }
-            )
+                for camera_key in self.config.camera_keys
+            }
 
         return sample
 
@@ -185,4 +234,3 @@ class LiberoWindowDataset(Dataset[dict[str, Any]]):
         files = getattr(self, "_files", None)
         if files:
             self.close()
-

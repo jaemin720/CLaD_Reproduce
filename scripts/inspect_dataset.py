@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +19,28 @@ def _shape(value: Any) -> str:
     return repr(value)
 
 
+def _flatten(prefix: str, value: Any) -> Iterator[tuple[str, Any]]:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            child_prefix = f"{prefix}.{key}" if prefix else str(key)
+            yield from _flatten(child_prefix, child)
+    else:
+        yield prefix, value
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-dir", type=Path, required=True)
     parser.add_argument("--horizon", type=int, default=6)
-    parser.add_argument("--camera-key", default="obs/agentview_rgb")
+    parser.add_argument(
+        "--camera-key",
+        dest="camera_keys",
+        action="append",
+        help=(
+            "HDF5 camera path relative to demo_N. Repeat for multiple views. "
+            "Defaults to obs/agentview_rgb."
+        ),
+    )
     parser.add_argument("--proprio-key", default="robot_states")
     parser.add_argument("--no-images", action="store_true")
     return parser.parse_args()
@@ -30,11 +48,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    camera_keys = tuple(args.camera_keys or ("obs/agentview_rgb",))
     dataset = LiberoWindowDataset(
         LiberoDatasetConfig(
             dataset_dir=args.dataset_dir,
             horizon=args.horizon,
-            camera_key=args.camera_key,
+            camera_keys=camera_keys,
             proprio_key=args.proprio_key,
             include_images=not args.no_images,
         )
@@ -49,11 +68,11 @@ def main() -> None:
 
         print("\nfirst window")
         for key, value in dataset[0].items():
-            print(f"- {key}: {_shape(value)}")
+            for path, leaf in _flatten(key, value):
+                print(f"- {path}: {_shape(leaf)}")
     finally:
         dataset.close()
 
 
 if __name__ == "__main__":
     main()
-

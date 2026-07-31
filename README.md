@@ -37,6 +37,18 @@ target actions:[t, t + tau)
 
 Windows never cross HDF5 demonstration boundaries.
 
+Images use a view-indexed structure even in the default single-camera mode:
+
+```text
+sample["images"]["agentview_rgb"]["prev" | "now" | "future"]
+```
+
+The default configuration contains only `obs/agentview_rgb`, matching the
+single-image formulation in the paper. A future multi-view experiment can add
+`obs/eye_in_hand_rgb` to `camera_keys` without changing the dataset or batch
+interface. View fusion belongs to the DecisionNCE model adapter rather than the
+HDF5 loader.
+
 ## Development setup
 
 ```bash

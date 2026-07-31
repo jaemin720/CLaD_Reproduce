@@ -21,6 +21,9 @@ def _create_demo(data_group: h5py.Group, demo_index: int, length: int) -> None:
     images = np.zeros((length, 4, 5, 3), dtype=np.uint8)
     images[:, 0, 0, 0] = np.arange(length, dtype=np.uint8)
     obs.create_dataset("agentview_rgb", data=images)
+    wrist_images = np.zeros((length, 3, 2, 3), dtype=np.uint8)
+    wrist_images[:, 0, 0, 1] = np.arange(length, dtype=np.uint8) + 100
+    obs.create_dataset("eye_in_hand_rgb", data=wrist_images)
 
 
 def _create_task_file(root: Path) -> Path:
@@ -72,8 +75,9 @@ def test_dataset_builds_episode_safe_windows(tmp_path: Path) -> None:
             first["target_actions"],
             torch.tensor([[2.0, -2.0], [3.0, -3.0]]),
         )
-        assert first["image_now"].shape == (4, 5, 3)
-        assert first["image_now"].dtype == torch.uint8
+        assert set(first["images"]) == {"agentview_rgb"}
+        assert first["images"]["agentview_rgb"]["now"].shape == (4, 5, 3)
+        assert first["images"]["agentview_rgb"]["now"].dtype == torch.uint8
 
         last = dataset[-1]
         assert last["episode_id"] == "demo_1"
@@ -96,9 +100,40 @@ def test_images_can_be_excluded_for_feature_only_loading(tmp_path: Path) -> None
 
     try:
         sample = dataset[0]
-        assert not any(key.startswith("image_") for key in sample)
+        assert "images" not in sample
     finally:
         dataset.close()
+
+
+def test_multiple_camera_views_share_one_stable_sample_contract(tmp_path: Path) -> None:
+    _create_task_file(tmp_path)
+    dataset = LiberoWindowDataset(
+        LiberoDatasetConfig(
+            dataset_dir=tmp_path,
+            horizon=2,
+            camera_keys=("obs/agentview_rgb", "obs/eye_in_hand_rgb"),
+        )
+    )
+
+    try:
+        images = dataset[0]["images"]
+        assert set(images) == {"agentview_rgb", "eye_in_hand_rgb"}
+        assert images["agentview_rgb"]["now"].shape == (4, 5, 3)
+        assert images["eye_in_hand_rgb"]["now"].shape == (3, 2, 3)
+        assert images["eye_in_hand_rgb"]["now"][0, 0, 1].item() == 102
+    finally:
+        dataset.close()
+
+
+def test_camera_keys_accept_yaml_style_lists(tmp_path: Path) -> None:
+    _create_task_file(tmp_path)
+    config = LiberoDatasetConfig(
+        dataset_dir=tmp_path,
+        horizon=2,
+        camera_keys=["obs/agentview_rgb"],  # type: ignore[arg-type]
+    )
+
+    assert config.camera_keys == ("obs/agentview_rgb",)
 
 
 def test_open_dataset_can_be_pickled_for_dataloader_workers(tmp_path: Path) -> None:
