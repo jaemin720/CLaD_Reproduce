@@ -19,7 +19,8 @@ paper:
 - [x] Stage 1 modality-specific transition cross-attention
 - [x] Stage 1 asymmetric cross-attention and learnable dynamics pooling
 - [x] Stage 1 latent foresight, EMA targets, and reconstruction objective
-- [ ] Stage 1 composed model and 25K-step training entrypoint
+- [x] Stage 1 cache-backed dataset and composed model
+- [ ] Stage 1 25K-step trainer and checkpointing
 - [ ] Stage 2 diffusion policy
 - [ ] LIBERO-LONG rollout evaluation
 

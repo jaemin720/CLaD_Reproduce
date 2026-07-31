@@ -332,6 +332,18 @@ class DecisionNCEFeatureCache:
         }
         self._files: dict[str, h5py.File] = {}
 
+    @property
+    def task_ids(self) -> tuple[str, ...]:
+        """Task identifiers available in this cache, in manifest order."""
+
+        return tuple(entry["task_id"] for entry in self.manifest["tasks"])
+
+    @property
+    def camera_keys(self) -> tuple[str, ...]:
+        """Source HDF5 camera keys encoded into this cache."""
+
+        return normalize_camera_keys(self.manifest["spec"]["camera_keys"])
+
     def _get_file(self, task_id: str) -> h5py.File:
         if task_id not in self._task_paths:
             raise KeyError(f"Task {task_id!r} is not present in the feature cache")
@@ -374,4 +386,3 @@ class DecisionNCEFeatureCache:
         files = getattr(self, "_files", None)
         if files:
             self.close()
-

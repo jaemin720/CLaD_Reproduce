@@ -26,6 +26,12 @@ from clad.models.clad_inputs import (
     ProprioStateEncoder,
     SemanticStateEncoder,
 )
+from clad.models.clad_stage1 import (
+    CLaDStage1Batch,
+    CLaDStage1Config,
+    CLaDStage1Model,
+    CLaDStage1Output,
+)
 from clad.models.clad_transition import (
     CLaDTransitionEncoders,
     CLaDTransitionOutput,
@@ -47,6 +53,10 @@ __all__ = [
     "CLaDInputEncoders",
     "CLaDLossOutput",
     "CLaDObjective",
+    "CLaDStage1Batch",
+    "CLaDStage1Config",
+    "CLaDStage1Model",
+    "CLaDStage1Output",
     "CLaDTransitionEncoders",
     "CLaDTransitionOutput",
     "CrossAttentionBlock",

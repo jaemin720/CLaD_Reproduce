@@ -34,7 +34,8 @@ repository.
 - [x] learnable-query pooling into `z_dyn`;
 - [x] future latent predictors, EMA target encoders, and reconstruction heads;
 - [x] `L_latent + 0.1 * L_recon`;
-- composed Stage 1 model, optimizer, checkpointing, and 25K-step trainer.
+- [x] cache-backed LIBERO dataset and composed Stage 1 model;
+- optimizer, checkpointing, and 25K-step trainer.
 
 The paper does not specify the input MLP depth, action positional encoding, or
 multi-view fusion. This reproduction uses two-layer MLP tokenizers, learned
@@ -57,6 +58,13 @@ mean-pools the token dimension without adding target-only parameters. Equation
 (17) is implemented as written by L2-normalizing the stopped-gradient EMA
 targets, while equation (18) reconstructs raw future proprioception and the
 future cached VLM visual feature `s_v`, before language FiLM.
+
+`CachedLiberoWindowDataset` joins proprioception/actions from the source HDF5
+with cached `prev`, `now`, and `future` VLM features using the same task,
+episode, and anchor index. It requires complete task/camera cache coverage and
+avoids loading raw images during Stage 1 training. `CLaDStage1Model` consumes
+the collated batch, returns every intermediate diagnostic and loss component,
+and exposes an explicit `update_ema()` call for use after each optimizer step.
 
 ## 3. Stage 2: foresight-conditioned diffusion policy — pending
 
