@@ -110,7 +110,13 @@ class FeatureFiLM(nn.Module):
                 f"got {tuple(view.shape)}"
             )
 
-    def _fuse_views(self, features: VisionFeatures) -> torch.Tensor:
+    def fuse_views(self, features: VisionFeatures) -> torch.Tensor:
+        """Return one visual feature vector per sample.
+
+        This public operation is also used as the semantic reconstruction
+        target in equation (18), before language-conditioned FiLM is applied.
+        """
+
         if isinstance(features, Mapping):
             if not features:
                 raise ValueError("vision feature mapping cannot be empty")
@@ -142,7 +148,7 @@ class FeatureFiLM(nn.Module):
         vision_features: VisionFeatures,
         text_features: torch.Tensor,
     ) -> torch.Tensor:
-        vision = self._fuse_views(vision_features)
+        vision = self.fuse_views(vision_features)
         if text_features.ndim != 2 or text_features.shape[-1] != self.condition_dim:
             raise ValueError(
                 f"text_features must have shape [B, {self.condition_dim}], "

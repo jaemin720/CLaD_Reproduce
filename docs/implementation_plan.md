@@ -32,8 +32,9 @@ repository.
 - [x] modality-specific transition cross-attention;
 - [x] asymmetric cross-attention: proprioceptive transition queries semantics;
 - [x] learnable-query pooling into `z_dyn`;
-- future latent predictors, EMA target encoders, and reconstruction heads;
-- `L_latent + 0.1 * L_recon`.
+- [x] future latent predictors, EMA target encoders, and reconstruction heads;
+- [x] `L_latent + 0.1 * L_recon`;
+- composed Stage 1 model, optimizer, checkpointing, and 25K-step trainer.
 
 The paper does not specify the input MLP depth, action positional encoding, or
 multi-view fusion. This reproduction uses two-layer MLP tokenizers, learned
@@ -48,6 +49,14 @@ completed Stage 1 model approach the reported 0.33B CLaD parameter budget.
 Equation (10) follows the cited Perceiver readout: one learned `q_out` attends
 over the proprioception-grounded semantic transition tokens and produces one
 `H`-dimensional `z_dyn`.
+
+Equations (11)--(19) use two-layer MLP predictors and reconstruction heads.
+The paper does not explain how each EMA encoder's `N x H` state tokens become
+the `H`-dimensional target in equations (15) and (16), so this reproduction
+mean-pools the token dimension without adding target-only parameters. Equation
+(17) is implemented as written by L2-normalizing the stopped-gradient EMA
+targets, while equation (18) reconstructs raw future proprioception and the
+future cached VLM visual feature `s_v`, before language FiLM.
 
 ## 3. Stage 2: foresight-conditioned diffusion policy — pending
 

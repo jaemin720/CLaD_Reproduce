@@ -26,3 +26,15 @@ cross_attention:
   attention_dropout: 0.0
   residual_dropout: 0.0
   norm_eps: 1.0e-5
+
+# Equation (11)--(19). EMA momentum and reconstruction weight are reported;
+# MLP widths and mean pooling over EMA target tokens are reproduction
+# assumptions because the paper does not provide those details.
+foresight:
+  predictor_hidden_dim: 1024
+  decoder_hidden_dim: 1024
+  dropout: 0.0
+  ema_momentum: 0.995
+  reconstruction_weight: 0.1
+  normalization_eps: 1.0e-6
+  target_pooling: mean
