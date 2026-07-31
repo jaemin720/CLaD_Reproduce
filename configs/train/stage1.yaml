@@ -1,0 +1,24 @@
+# Paper-reported Stage 1 settings.
+max_steps: 25000
+batch_size: 128
+
+# Reproduction assumptions: the paper does not report optimizer, learning
+# rate, scheduler, precision, gradient clipping, or DataLoader settings.
+gradient_accumulation_steps: 1
+learning_rate: 1.0e-4
+weight_decay: 0.01
+beta1: 0.9
+beta2: 0.95
+warmup_steps: 500
+min_lr_ratio: 0.01
+max_grad_norm: 1.0
+amp_enabled: true
+amp_dtype: float16
+
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+log_interval: 10
+checkpoint_interval: 1000
+save_final_checkpoint: true
+seed: 42

@@ -20,7 +20,7 @@ paper:
 - [x] Stage 1 asymmetric cross-attention and learnable dynamics pooling
 - [x] Stage 1 latent foresight, EMA targets, and reconstruction objective
 - [x] Stage 1 cache-backed dataset and composed model
-- [ ] Stage 1 25K-step trainer and checkpointing
+- [x] Stage 1 25K-step trainer and checkpointing
 - [ ] Stage 2 diffusion policy
 - [ ] LIBERO-LONG rollout evaluation
 
@@ -125,6 +125,42 @@ rejected unless overwrite is explicitly requested.
 The paper does not state whether DecisionNCE-P, DecisionNCE-T, or a downstream
 Robo-MUTUAL checkpoint was used. `DecisionNCE-T` is therefore an explicit
 reproduction assumption rather than a confirmed paper detail.
+
+## Stage 1 training
+
+Build the complete ten-task feature cache before starting the paper-scale run,
+then launch the single-GPU trainer:
+
+```bash
+python scripts/train_clad_stage1.py \
+  --dataset-dir /data/jack/libero_datasets/libero_10 \
+  --cache-dir .cache/decisionnce/libero_long \
+  --output-dir outputs/clad_stage1 \
+  --device cuda
+```
+
+The defaults in `configs/train/stage1.yaml` use the paper-reported 25,000
+optimization steps and batch size 128. AdamW, a 500-step warmup followed by
+cosine decay, gradient clipping, and CUDA fp16 AMP are explicit reproduction
+assumptions because the paper does not report those settings. Gradient
+accumulation is configurable when batch size 128 does not fit one GPU.
+
+The trainer writes one atomically replaced checkpoint at
+`outputs/clad_stage1/stage1_latest.pt`. It contains online and EMA model
+weights, optimizer, scheduler, AMP scaler, RNG, exact shuffled data position,
+and global step. Resume the same run configuration with:
+
+```bash
+python scripts/train_clad_stage1.py \
+  --cache-dir .cache/decisionnce/libero_long \
+  --output-dir outputs/clad_stage1 \
+  --resume outputs/clad_stage1/stage1_latest.pt
+```
+
+For a fast plumbing check, the CLI also accepts `--max-steps`, `--batch-size`,
+`--attention-layers`, `--num-workers`, and checkpoint/AMP overrides. These
+change the reproduction configuration and are intended for smoke tests or
+resource-constrained experiments, not the reported run.
 
 ## Licensing
 

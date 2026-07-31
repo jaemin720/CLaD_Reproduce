@@ -35,7 +35,7 @@ repository.
 - [x] future latent predictors, EMA target encoders, and reconstruction heads;
 - [x] `L_latent + 0.1 * L_recon`;
 - [x] cache-backed LIBERO dataset and composed Stage 1 model;
-- optimizer, checkpointing, and 25K-step trainer.
+- [x] optimizer, EMA update, AMP, checkpointing, and 25K-step trainer.
 
 The paper does not specify the input MLP depth, action positional encoding, or
 multi-view fusion. This reproduction uses two-layer MLP tokenizers, learned
@@ -65,6 +65,20 @@ episode, and anchor index. It requires complete task/camera cache coverage and
 avoids loading raw images during Stage 1 training. `CLaDStage1Model` consumes
 the collated batch, returns every intermediate diagnostic and loss component,
 and exposes an explicit `update_ema()` call for use after each optimizer step.
+
+`Stage1Trainer` performs step-based single-GPU training with configurable
+gradient accumulation. Every successful optimizer update is followed by the
+paper's 0.995 EMA target update. The checkpoint stores model/EMA parameters,
+AdamW, learning-rate scheduler, fp16 scaler, process RNGs, and a consumed-batch
+cursor. The custom shuffled batch sampler derives each epoch permutation from
+the seed and epoch, so resuming is data-order exact even when DataLoader
+workers had prefetched later batches.
+
+Only the 25K steps, batch size 128, and EMA momentum are reported by the paper.
+The default AdamW settings (`lr=1e-4`, weight decay 0.01, betas 0.9/0.95),
+500-step warmup plus cosine decay, gradient norm 1.0, and CUDA fp16 AMP are
+documented reproduction assumptions and remain configurable in
+`configs/train/stage1.yaml`.
 
 ## 3. Stage 2: foresight-conditioned diffusion policy — pending
 

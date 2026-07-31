@@ -45,6 +45,47 @@ class CLaDStage1Config:
     attention: CrossAttentionConfig
     foresight: ForesightConfig
 
+    @classmethod
+    def from_mapping(cls, values: Mapping[str, Any]) -> CLaDStage1Config:
+        """Build the nested model config from ``clad_stage1.yaml``."""
+
+        known = set(CLaDInputEncoderConfig.__dataclass_fields__) | {
+            "cross_attention",
+            "foresight",
+        }
+        unknown = sorted(set(values) - known)
+        if unknown:
+            raise ValueError(f"Unknown Stage 1 model settings: {unknown}")
+
+        input_values = {
+            name: values[name]
+            for name in CLaDInputEncoderConfig.__dataclass_fields__
+            if name in values
+        }
+        inputs = CLaDInputEncoderConfig(**input_values)
+
+        attention_values = values.get("cross_attention", {})
+        if not isinstance(attention_values, Mapping):
+            raise TypeError("cross_attention config must be a mapping")
+        attention_kwargs = dict(attention_values)
+        attention_kwargs.setdefault("hidden_dim", inputs.hidden_dim)
+
+        foresight_values = values.get("foresight", {})
+        if not isinstance(foresight_values, Mapping):
+            raise TypeError("foresight config must be a mapping")
+        foresight_kwargs = dict(foresight_values)
+        foresight_kwargs.setdefault("hidden_dim", inputs.hidden_dim)
+        foresight_kwargs.setdefault("proprio_dim", inputs.proprio_dim)
+        foresight_kwargs.setdefault(
+            "semantic_visual_dim",
+            inputs.vision_feature_dim,
+        )
+        return cls(
+            inputs=inputs,
+            attention=CrossAttentionConfig(**attention_kwargs),
+            foresight=ForesightConfig(**foresight_kwargs),
+        )
+
     def __post_init__(self) -> None:
         hidden_dimensions = {
             self.inputs.hidden_dim,
