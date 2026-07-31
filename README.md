@@ -128,6 +128,9 @@ reproduction assumption rather than a confirmed paper detail.
 
 ## Stage 1 training
 
+전체 절차와 설정, smoke test, checkpoint 재개 방법은
+[`docs/stage1_training.md`](docs/stage1_training.md)에 정리되어 있다.
+
 Build the complete ten-task feature cache before starting the paper-scale run,
 then launch the single-GPU trainer:
 
