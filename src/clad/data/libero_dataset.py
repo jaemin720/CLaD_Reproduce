@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from clad.data.camera import camera_view_name, normalize_camera_keys
 from clad.data.sequence_sampler import WindowIndex, build_window_indices
 from clad.data.task_registry import LiberoTask, discover_libero_tasks, list_demo_keys
 
@@ -27,37 +28,14 @@ class LiberoDatasetConfig:
     strict: bool = True
 
     def __post_init__(self) -> None:
-        if isinstance(self.camera_keys, str):
-            raise TypeError(
-                "camera_keys must be a sequence of HDF5 paths, not a single string"
-            )
-
         # Hydra/OmegaConf commonly constructs this field from a YAML list.
         # Normalize it once so the rest of the data pipeline has an immutable
         # and hashable camera specification.
-        camera_keys = tuple(self.camera_keys)
-        object.__setattr__(self, "camera_keys", camera_keys)
-
-        if self.include_images and not camera_keys:
-            raise ValueError("camera_keys cannot be empty when include_images=True")
-        if len(set(camera_keys)) != len(camera_keys):
-            raise ValueError(f"camera_keys contains duplicate paths: {camera_keys}")
-
-        view_names = tuple(_camera_view_name(key) for key in camera_keys)
-        if len(set(view_names)) != len(view_names):
-            raise ValueError(
-                "Each camera path must have a unique final component; "
-                f"got view names {view_names}"
-            )
-
-
-def _camera_view_name(camera_key: str) -> str:
-    """Convert ``obs/agentview_rgb`` into the stable view id ``agentview_rgb``."""
-
-    normalized = camera_key.rstrip("/")
-    if not normalized:
-        raise ValueError("camera keys cannot be empty")
-    return normalized.rsplit("/", maxsplit=1)[-1]
+        if self.include_images:
+            normalized = normalize_camera_keys(self.camera_keys)
+        else:
+            normalized = tuple(self.camera_keys)
+        object.__setattr__(self, "camera_keys", normalized)
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,7 +187,7 @@ class LiberoWindowDataset(Dataset[dict[str, Any]]):
 
         if self.config.include_images:
             sample["images"] = {
-                _camera_view_name(camera_key): {
+                camera_view_name(camera_key): {
                     "prev": self._image_tensor(demo_group[camera_key], t - tau),
                     "now": self._image_tensor(demo_group[camera_key], t),
                     "future": self._image_tensor(demo_group[camera_key], t + tau),

@@ -1,0 +1,12 @@
+# The CLaD paper names DecisionNCE but does not identify P/T or a checkpoint.
+# DecisionNCE-T is our explicit reproduction default because it is trained to
+# align visual transition directions with language.
+model_name: DecisionNCE-T
+device: auto
+
+# Official source inspected when implementing the adapter.
+source_revision: ebdc585c5e6833ec3a2ba77f801b15c74d7a28f8
+
+# Fill this after the exact experiment checkpoint is selected.
+checkpoint_sha256: ""
+
