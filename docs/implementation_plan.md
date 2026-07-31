@@ -10,7 +10,7 @@ training procedure.
 - episode-safe windows at `t - tau`, `t`, and `t + tau`;
 - one-camera default with a stable multi-view extension contract.
 
-## 1. Frozen VLM and feature cache — implemented, checkpoint validation pending
+## 1. Frozen VLM and feature cache — complete
 
 - frozen DecisionNCE adapter;
 - official image preprocessing and text tokenization delegated to upstream;
@@ -18,20 +18,33 @@ training procedure.
 - task-wise, atomic HDF5 feature cache;
 - dataset/model/checkpoint fingerprint and lazy cache reader.
 
-DecisionNCE source is pinned as an MIT-licensed Git submodule. The remaining
-external action is selecting the exact DecisionNCE or Robo-MUTUAL checkpoint.
-The paper does not identify it, and checkpoints are deliberately not
-redistributed from this Apache-2.0 parent repository.
+The official DecisionNCE-T checkpoint was loaded and validated against one
+real LIBERO-LONG task. Its observed image and text feature dimensions are both
+1024. DecisionNCE source remains pinned as an MIT-licensed Git submodule, while
+the downloaded checkpoint is not redistributed from this Apache-2.0 parent
+repository.
 
-## 2. Stage 1: Cross-Modal Latent Dynamics — next
+## 2. Stage 1: Cross-Modal Latent Dynamics — in progress
 
-- semantic FiLM fusion of cached image and text features;
-- proprioceptive, semantic, and action tokenizers;
-- modality-specific transition cross-attention;
+- [x] semantic FiLM fusion of cached image and text features;
+- [x] proprioceptive, semantic, and action tokenizers;
+- [x] train-only stochastic action token masking;
+- [x] modality-specific transition cross-attention;
 - asymmetric cross-attention: proprioceptive transition queries semantics;
 - learnable-query pooling into `z_dyn`;
 - future latent predictors, EMA target encoders, and reconstruction heads;
 - `L_latent + 0.1 * L_recon`.
+
+The paper does not specify the input MLP depth, action positional encoding, or
+multi-view fusion. This reproduction uses two-layer MLP tokenizers, learned
+action position embeddings, and mean fusion when more than one cached camera
+view is supplied. The default one-camera path performs no cross-view fusion.
+
+The paper also omits cross-attention depth and head count. The configurable
+default uses eight pre-norm layers per stack, 16 heads (64 dimensions per
+head), and a `4H` feed-forward width. Applying the same stack depth to the two
+modality transitions and the subsequent asymmetric transition makes the
+completed Stage 1 model approach the reported 0.33B CLaD parameter budget.
 
 ## 3. Stage 2: foresight-conditioned diffusion policy — pending
 

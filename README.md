@@ -14,8 +14,10 @@ paper:
 - [x] LIBERO HDF5 discovery and schema inspection
 - [x] episode-safe `tau`-window sampling
 - [x] frozen DecisionNCE adapter and versioned feature cache
-- [ ] official DecisionNCE checkpoint smoke test
-- [ ] Stage 1 CLaD
+- [x] official DecisionNCE-T checkpoint and real feature-cache smoke test
+- [x] Stage 1 semantic/proprioceptive/action input encoders
+- [x] Stage 1 modality-specific transition cross-attention
+- [ ] Stage 1 asymmetric cross-attention and latent foresight
 - [ ] Stage 2 diffusion policy
 - [ ] LIBERO-LONG rollout evaluation
 

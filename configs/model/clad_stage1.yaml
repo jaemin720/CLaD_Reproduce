@@ -1,0 +1,27 @@
+# Paper settings from Section 5.1.
+vision_feature_dim: 1024
+text_feature_dim: 1024
+proprio_dim: 9
+action_dim: 7
+hidden_dim: 1024
+num_proprio_tokens: 4
+num_semantic_tokens: 4
+horizon: 6
+action_mask_ratio: 0.3
+
+# Explicit reproduction assumptions: the paper specifies MLP encoders but not
+# their depth/dropout, action positional encoding, or multi-view fusion.
+tokenizer_mlp_hidden_dim: 1024
+tokenizer_dropout: 0.0
+view_fusion: mean
+
+# Cross-attention depth/head count are not reported. Eight layers per stack
+# makes the completed three-stack CLaD model approach the reported 0.33B
+# parameter budget; 16 heads gives a conventional 64-dimensional head.
+cross_attention:
+  num_layers: 8
+  num_heads: 16
+  ffn_multiplier: 4.0
+  attention_dropout: 0.0
+  residual_dropout: 0.0
+  norm_eps: 1.0e-5
