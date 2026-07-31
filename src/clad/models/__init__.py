@@ -1,5 +1,10 @@
 """Neural-network components for the CLaD reproduction."""
 
+from clad.models.clad_dynamics import (
+    CrossModalDynamicsEncoder,
+    CrossModalDynamicsOutput,
+    LearnableQueryPooler,
+)
 from clad.models.clad_inputs import (
     ActionSequenceEncoder,
     ActionTokenOutput,
@@ -35,9 +40,12 @@ __all__ = [
     "CrossAttentionConfig",
     "CrossAttentionOutput",
     "CrossAttentionStack",
+    "CrossModalDynamicsEncoder",
+    "CrossModalDynamicsOutput",
     "DecisionNCEAdapter",
     "DecisionNCEAdapterConfig",
     "FeatureFiLM",
+    "LearnableQueryPooler",
     "MLPTokenizer",
     "ModalityTransitionEncoder",
     "ProprioStateEncoder",

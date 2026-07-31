@@ -17,7 +17,8 @@ view_fusion: mean
 
 # Cross-attention depth/head count are not reported. Eight layers per stack
 # makes the completed three-stack CLaD model approach the reported 0.33B
-# parameter budget; 16 heads gives a conventional 64-dimensional head.
+# parameter budget; 16 heads gives a conventional 64-dimensional head. The
+# Perceiver-style q_out pooling uses one additional cross-attention block.
 cross_attention:
   num_layers: 8
   num_heads: 16

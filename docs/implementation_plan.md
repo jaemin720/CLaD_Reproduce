@@ -30,8 +30,8 @@ repository.
 - [x] proprioceptive, semantic, and action tokenizers;
 - [x] train-only stochastic action token masking;
 - [x] modality-specific transition cross-attention;
-- asymmetric cross-attention: proprioceptive transition queries semantics;
-- learnable-query pooling into `z_dyn`;
+- [x] asymmetric cross-attention: proprioceptive transition queries semantics;
+- [x] learnable-query pooling into `z_dyn`;
 - future latent predictors, EMA target encoders, and reconstruction heads;
 - `L_latent + 0.1 * L_recon`.
 
@@ -45,6 +45,9 @@ default uses eight pre-norm layers per stack, 16 heads (64 dimensions per
 head), and a `4H` feed-forward width. Applying the same stack depth to the two
 modality transitions and the subsequent asymmetric transition makes the
 completed Stage 1 model approach the reported 0.33B CLaD parameter budget.
+Equation (10) follows the cited Perceiver readout: one learned `q_out` attends
+over the proprioception-grounded semantic transition tokens and produces one
+`H`-dimensional `z_dyn`.
 
 ## 3. Stage 2: foresight-conditioned diffusion policy — pending
 

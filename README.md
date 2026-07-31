@@ -17,7 +17,8 @@ paper:
 - [x] official DecisionNCE-T checkpoint and real feature-cache smoke test
 - [x] Stage 1 semantic/proprioceptive/action input encoders
 - [x] Stage 1 modality-specific transition cross-attention
-- [ ] Stage 1 asymmetric cross-attention and latent foresight
+- [x] Stage 1 asymmetric cross-attention and learnable dynamics pooling
+- [ ] Stage 1 latent foresight, EMA targets, and reconstruction
 - [ ] Stage 2 diffusion policy
 - [ ] LIBERO-LONG rollout evaluation
 
