@@ -146,7 +146,9 @@ The defaults in `configs/train/stage1.yaml` use the paper-reported 25,000
 optimization steps and batch size 128. AdamW, a 500-step warmup followed by
 cosine decay, gradient clipping, and CUDA fp16 AMP are explicit reproduction
 assumptions because the paper does not report those settings. Gradient
-accumulation is configurable when batch size 128 does not fit one GPU.
+accumulation is configurable when batch size 128 does not fit one GPU. AMP
+overflow attempts are logged separately and do not consume the 25K successful
+optimizer-step budget.
 
 The trainer writes one atomically replaced checkpoint at
 `outputs/clad_stage1/stage1_latest.pt`. It contains online and EMA model

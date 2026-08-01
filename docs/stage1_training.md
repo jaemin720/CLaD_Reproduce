@@ -110,12 +110,16 @@ min_lr_ratio: 0.01
 max_grad_norm: 1.0
 amp_enabled: true
 amp_dtype: float16
+amp_init_scale: 2048.0
+max_consecutive_optimizer_skips: 16
 checkpoint_interval: 1000
 ```
 
 논문이 명시한 값은 25K step, batch 128, EMA momentum 0.995이다. AdamW,
 learning rate, warmup/cosine scheduler, gradient clipping과 fp16 AMP는 논문에
-보고되지 않아 이 재현에서 사용한 명시적 가정이다.
+보고되지 않아 이 재현에서 사용한 명시적 가정이다. 기본 `amp_init_scale`은
+전체 8-layer GPU smoke test에서 PyTorch 기본값 65536이 다섯 번 overflow한 뒤
+안정화된 2048을 사용한다. 이후에도 GradScaler가 scale을 동적으로 조정한다.
 
 설정을 별도로 보존하려면 기존 파일을 복사하고 `--train-config`로 선택한다.
 
@@ -169,6 +173,12 @@ python scripts/train_clad_stage1.py \
 - `optimizer_step_skipped`가 `0.0`이다.
 - CUDA out-of-memory 오류가 발생하지 않는다.
 
+`max_steps`는 시도 횟수가 아니라 성공한 optimizer update 수다. AMP overflow가
+발생하면 해당 시도는 `attempt_step`과 `skipped_optimizer_steps`에만 기록되며,
+Trainer는 성공한 update가 `max_steps`에 도달할 때까지 계속 실행한다. 연속
+skip이 `max_consecutive_optimizer_skips`에 도달하면 무한 반복하는 대신 원인과
+현재 AMP scale을 포함한 오류를 발생시킨다.
+
 데이터부터 optimizer까지의 연결만 빠르게 확인하고 싶다면
 `--attention-layers 1`을 추가할 수 있다. 이 경우 모델이 축소되므로 기본
 8-layer 모델의 메모리 검증을 대신하지는 않는다.
@@ -200,6 +210,8 @@ override를 사용하는 것을 권장한다.
 - modality별 latent/reconstruction loss
 - `action_mask_ratio`
 - clipping 전 `gradient_norm`
+- 성공한 update 수 `step`과 전체 시도 수 `attempt_step`
+- `skipped_optimizer_steps`, `consecutive_optimizer_skips`, `amp_scale`
 - 다음 step에 적용될 `learning_rate`
 - AMP overflow에 따른 `optimizer_step_skipped`
 
@@ -217,6 +229,7 @@ outputs/clad_stage1/stage1_latest.pt
 - AdamW optimizer와 learning-rate scheduler
 - AMP gradient scaler
 - global step과 최근 metrics
+- 전체 optimizer 시도 횟수와 AMP skip 통계
 - Python, NumPy, CPU/CUDA PyTorch RNG
 - shuffled DataLoader의 정확한 batch 위치
 
@@ -261,8 +274,10 @@ task subset의 window 수보다 `batch_size`가 크면 이 오류가 발생한�
 ### optimizer_step_skipped가 1.0
 
 fp16 gradient에 `inf` 또는 `nan`이 감지되어 AMP scaler가 optimizer update를
-건너뛴 경우다. 간헐적인 skip은 scaler가 조정될 수 있지만 반복된다면 loss,
-입력 특징과 learning rate를 확인한다.
+건너뛴 경우다. 이 시도는 25K optimizer-step budget에 포함되지 않는다.
+간헐적인 skip은 scaler가 자동 조정하지만, 설정된 연속 skip 한도까지 반복되면
+학습을 중단한다. 이 경우 loss와 입력 특징을 확인하고 필요하면
+`amp_init_scale`을 낮춘다.
 
 ## 9. Stage 1 완료 조건
 

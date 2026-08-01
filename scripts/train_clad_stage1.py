@@ -61,6 +61,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int)
     parser.add_argument("--log-interval", type=int)
     parser.add_argument("--checkpoint-interval", type=int)
+    parser.add_argument("--amp-init-scale", type=float)
+    parser.add_argument("--max-consecutive-optimizer-skips", type=int)
     parser.add_argument("--attention-layers", type=int)
     parser.add_argument(
         "--amp",
@@ -95,6 +97,8 @@ def _trainer_config(args: argparse.Namespace) -> Stage1TrainerConfig:
         "num_workers": args.num_workers,
         "log_interval": args.log_interval,
         "checkpoint_interval": args.checkpoint_interval,
+        "amp_init_scale": args.amp_init_scale,
+        "max_consecutive_optimizer_skips": args.max_consecutive_optimizer_skips,
         "amp_enabled": args.amp,
         "save_final_checkpoint": args.save_final_checkpoint,
     }
@@ -193,6 +197,8 @@ def main() -> None:
             json.dumps(
                 {
                     "completed_step": result.global_step,
+                    "attempt_step": result.attempt_step,
+                    "skipped_optimizer_steps": result.skipped_optimizer_steps,
                     "checkpoint": (
                         str(result.checkpoint_path) if result.checkpoint_path is not None else None
                     ),

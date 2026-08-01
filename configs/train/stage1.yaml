@@ -14,6 +14,10 @@ min_lr_ratio: 0.01
 max_grad_norm: 1.0
 amp_enabled: true
 amp_dtype: float16
+# The full 8-layer GPU smoke test stabilized at scale 2048 after the default
+# PyTorch scale overflowed. Dynamic scaling still backs off when needed.
+amp_init_scale: 2048.0
+max_consecutive_optimizer_skips: 16
 
 num_workers: 4
 pin_memory: true

@@ -21,6 +21,8 @@ from torch.utils.data import DataLoader, Dataset, Sampler
 
 from clad.models import CLaDStage1Batch, CLaDStage1Model, CLaDStage1Output
 
+STAGE1_CHECKPOINT_SCHEMA_VERSION = 2
+
 
 @dataclass(frozen=True, slots=True)
 class Stage1TrainerConfig:
@@ -38,6 +40,8 @@ class Stage1TrainerConfig:
     max_grad_norm: float = 1.0
     amp_enabled: bool = True
     amp_dtype: str = "float16"
+    amp_init_scale: float = 2_048.0
+    max_consecutive_optimizer_skips: int = 16
     num_workers: int = 4
     pin_memory: bool = True
     persistent_workers: bool = True
@@ -71,6 +75,13 @@ class Stage1TrainerConfig:
             raise ValueError(f"max_grad_norm must be positive, got {self.max_grad_norm}")
         if self.amp_dtype not in {"float16", "bfloat16"}:
             raise ValueError(f"amp_dtype must be 'float16' or 'bfloat16', got {self.amp_dtype!r}")
+        if self.amp_init_scale <= 0.0:
+            raise ValueError(f"amp_init_scale must be positive, got {self.amp_init_scale}")
+        if self.max_consecutive_optimizer_skips <= 0:
+            raise ValueError(
+                "max_consecutive_optimizer_skips must be positive, "
+                f"got {self.max_consecutive_optimizer_skips}"
+            )
         if self.num_workers < 0:
             raise ValueError(f"num_workers must be non-negative, got {self.num_workers}")
         if self.log_interval < 0 or self.checkpoint_interval < 0:
@@ -90,8 +101,16 @@ class Stage1TrainingResult:
     """Final trainer state returned to scripts and tests."""
 
     global_step: int
+    attempt_step: int
+    skipped_optimizer_steps: int
     latest_metrics: dict[str, float]
     checkpoint_path: Path | None
+
+
+@dataclass(frozen=True, slots=True)
+class _TrainStepResult:
+    metrics: dict[str, float]
+    optimizer_ran: bool
 
 
 class ResumableRandomBatchSampler(Sampler[list[int]]):
@@ -214,7 +233,13 @@ class Stage1Trainer:
         self.output_dir = Path(output_dir).expanduser().resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.metric_callback = metric_callback or self._print_metrics
+        # ``global_step`` counts successful optimizer updates, matching the
+        # paper's 25K training-step budget. AMP overflows only advance the
+        # diagnostic attempt counter.
         self.global_step = 0
+        self.attempt_step = 0
+        self.skipped_optimizer_steps = 0
+        self.consecutive_optimizer_skips = 0
         self.latest_metrics: dict[str, float] = {}
         self._iterator: Iterator[dict[str, Any]] | None = None
         batch_sampler = dataloader.batch_sampler
@@ -243,7 +268,10 @@ class Stage1Trainer:
             "bfloat16": torch.bfloat16,
         }[config.amp_dtype]
         scaler_enabled = self.amp_enabled and self.amp_dtype == torch.float16
-        self.scaler = torch.cuda.amp.GradScaler(enabled=scaler_enabled)
+        self.scaler = torch.cuda.amp.GradScaler(
+            init_scale=config.amp_init_scale,
+            enabled=scaler_enabled,
+        )
 
     @staticmethod
     def seed_everything(seed: int) -> torch.Generator:
@@ -316,7 +344,7 @@ class Stage1Trainer:
         ).float()
         return dict(zip(names, values.cpu().tolist(), strict=True))
 
-    def _train_step(self) -> dict[str, float]:
+    def _train_step(self) -> _TrainStepResult:
         self.model.train()
         self.optimizer.zero_grad(set_to_none=True)
         accumulated: dict[str, float] = {}
@@ -341,21 +369,30 @@ class Stage1Trainer:
             self._trainable_parameters,
             max_norm=self.config.max_grad_norm,
         )
-        previous_scale = self.scaler.get_scale()
-        self.scaler.step(self.optimizer)
-        self.scaler.update()
-        optimizer_ran = not self.scaler.is_enabled() or self.scaler.get_scale() >= previous_scale
+        previous_scale = float(self.scaler.get_scale())
+        if self.scaler.is_enabled():
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            optimizer_ran = float(self.scaler.get_scale()) >= previous_scale
+        else:
+            optimizer_ran = bool(torch.isfinite(gradient_norm).item())
+            if optimizer_ran:
+                self.optimizer.step()
         if optimizer_ran:
             self.model.update_ema()
             self.scheduler.step()
 
         accumulated["gradient_norm"] = float(gradient_norm.detach())
         accumulated["learning_rate"] = float(self.optimizer.param_groups[0]["lr"])
+        accumulated["amp_scale"] = float(self.scaler.get_scale())
         accumulated["optimizer_step_skipped"] = float(not optimizer_ran)
-        return accumulated
+        return _TrainStepResult(
+            metrics=accumulated,
+            optimizer_ran=optimizer_ran,
+        )
 
     def train(self, *, max_steps: int | None = None) -> Stage1TrainingResult:
-        """Train until an absolute optimizer-attempt step and save final state."""
+        """Train until an absolute number of successful optimizer updates."""
 
         target_step = self.config.max_steps if max_steps is None else max_steps
         if not self.global_step <= target_step <= self.config.max_steps:
@@ -367,19 +404,43 @@ class Stage1Trainer:
         checkpoint_path: Path | None = None
         last_log_time = time.perf_counter()
         while self.global_step < target_step:
-            metrics = self._train_step()
-            self.global_step += 1
+            step_result = self._train_step()
+            self.attempt_step += 1
+            if step_result.optimizer_ran:
+                self.global_step += 1
+                self.consecutive_optimizer_skips = 0
+            else:
+                self.skipped_optimizer_steps += 1
+                self.consecutive_optimizer_skips += 1
+
+            metrics = step_result.metrics
             metrics["step"] = float(self.global_step)
+            metrics["attempt_step"] = float(self.attempt_step)
+            metrics["skipped_optimizer_steps"] = float(self.skipped_optimizer_steps)
+            metrics["consecutive_optimizer_skips"] = float(self.consecutive_optimizer_skips)
             self.latest_metrics = metrics
 
-            if self.config.log_interval > 0 and self.global_step % self.config.log_interval == 0:
+            should_log = self.config.log_interval > 0 and (
+                self.attempt_step % self.config.log_interval == 0 or not step_result.optimizer_ran
+            )
+            if should_log:
                 current_time = time.perf_counter()
                 metrics["seconds_per_log_interval"] = current_time - last_log_time
                 last_log_time = current_time
                 self.metric_callback(dict(metrics))
 
+            if self.consecutive_optimizer_skips >= self.config.max_consecutive_optimizer_skips:
+                raise FloatingPointError(
+                    "Optimizer update was skipped "
+                    f"{self.consecutive_optimizer_skips} consecutive times; "
+                    f"latest gradient_norm={metrics['gradient_norm']}, "
+                    f"amp_scale={metrics['amp_scale']}. Check inputs/losses or "
+                    "lower amp_init_scale."
+                )
+
             if (
-                self.config.checkpoint_interval > 0
+                step_result.optimizer_ran
+                and self.config.checkpoint_interval > 0
                 and self.global_step % self.config.checkpoint_interval == 0
             ):
                 checkpoint_path = self.save_checkpoint()
@@ -393,6 +454,8 @@ class Stage1Trainer:
             checkpoint_path = self.save_checkpoint()
         return Stage1TrainingResult(
             global_step=self.global_step,
+            attempt_step=self.attempt_step,
+            skipped_optimizer_steps=self.skipped_optimizer_steps,
             latest_metrics=dict(self.latest_metrics),
             checkpoint_path=checkpoint_path,
         )
@@ -429,8 +492,11 @@ class Stage1Trainer:
         temporary = destination.with_suffix(destination.suffix + ".tmp")
         temporary.unlink(missing_ok=True)
         payload = {
-            "schema_version": 1,
+            "schema_version": STAGE1_CHECKPOINT_SCHEMA_VERSION,
             "global_step": self.global_step,
+            "attempt_step": self.attempt_step,
+            "skipped_optimizer_steps": self.skipped_optimizer_steps,
+            "consecutive_optimizer_skips": self.consecutive_optimizer_skips,
             "model": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict(),
@@ -477,15 +543,43 @@ class Stage1Trainer:
 
         checkpoint_path = Path(path).expanduser().resolve()
         payload = torch.load(checkpoint_path, map_location="cpu")
-        if int(payload.get("schema_version", -1)) != 1:
+        schema_version = int(payload.get("schema_version", -1))
+        if schema_version not in {1, STAGE1_CHECKPOINT_SCHEMA_VERSION}:
             raise ValueError(
                 f"Unsupported Stage 1 checkpoint schema: {payload.get('schema_version')!r}"
             )
-        global_step = int(payload["global_step"])
+        if schema_version == 1:
+            # Schema 1 counted AMP-skipped attempts as global steps. The
+            # scheduler advanced only after real optimizer updates, so its
+            # last_epoch recovers the successful update count.
+            attempt_step = int(payload["global_step"])
+            global_step = int(payload["scheduler"]["last_epoch"])
+            skipped_optimizer_steps = max(0, attempt_step - global_step)
+            consecutive_optimizer_skips = 0
+        else:
+            global_step = int(payload["global_step"])
+            attempt_step = int(payload["attempt_step"])
+            skipped_optimizer_steps = int(payload["skipped_optimizer_steps"])
+            consecutive_optimizer_skips = int(payload["consecutive_optimizer_skips"])
         if not 0 <= global_step <= self.config.max_steps:
             raise ValueError(
                 f"Checkpoint step {global_step} is outside this run's valid range "
                 f"[0, {self.config.max_steps}]"
+            )
+        if not 0 <= global_step <= attempt_step:
+            raise ValueError(
+                "Checkpoint counters must satisfy 0 <= global_step <= attempt_step, "
+                f"got {global_step} and {attempt_step}"
+            )
+        if skipped_optimizer_steps != attempt_step - global_step:
+            raise ValueError(
+                "Checkpoint skip count is inconsistent with attempt/global steps: "
+                f"{skipped_optimizer_steps} != {attempt_step} - {global_step}"
+            )
+        if not 0 <= consecutive_optimizer_skips <= skipped_optimizer_steps:
+            raise ValueError(
+                "Checkpoint consecutive optimizer skip count is invalid: "
+                f"{consecutive_optimizer_skips}"
             )
         self.model.load_state_dict(payload["model"])
         self.optimizer.load_state_dict(payload["optimizer"])
@@ -496,6 +590,9 @@ class Stage1Trainer:
         self.scheduler.load_state_dict(payload["scheduler"])
         self.scaler.load_state_dict(payload["scaler"])
         self.global_step = global_step
+        self.attempt_step = attempt_step
+        self.skipped_optimizer_steps = skipped_optimizer_steps
+        self.consecutive_optimizer_skips = consecutive_optimizer_skips
         self.latest_metrics = dict(payload.get("latest_metrics", {}))
         self._restore_rng_state(payload["rng_state"])
         self._restore_data_state(payload.get("data_state", {}))

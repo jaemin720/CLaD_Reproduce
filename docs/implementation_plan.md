@@ -74,6 +74,14 @@ cursor. The custom shuffled batch sampler derives each epoch permutation from
 the seed and epoch, so resuming is data-order exact even when DataLoader
 workers had prefetched later batches.
 
+AMP-overflow attempts are tracked separately from successful optimizer steps,
+so the reported 25K-step budget always means 25K parameter and EMA updates.
+The observed full-model fp16 smoke test stabilized at gradient scale 2048;
+that value is the configurable initial scale, while dynamic scaling remains
+enabled. Scale, attempts, total skips, and consecutive skips are logged and
+checkpointed, with a configurable fail-fast limit for persistent non-finite
+gradients.
+
 Only the 25K steps, batch size 128, and EMA momentum are reported by the paper.
 The default AdamW settings (`lr=1e-4`, weight decay 0.01, betas 0.9/0.95),
 500-step warmup plus cosine decay, gradient norm 1.0, and CUDA fp16 AMP are
