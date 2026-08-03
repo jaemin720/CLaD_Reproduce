@@ -1,3 +1,6 @@
 [submodule "third_party/DecisionNCE"]
 	path = third_party/DecisionNCE
 	url = https://github.com/2toinf/DecisionNCE.git
+[submodule "third_party/LIBERO"]
+	path = third_party/LIBERO
+	url = https://github.com/Lifelong-Robot-Learning/LIBERO.git

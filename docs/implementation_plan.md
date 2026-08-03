@@ -88,7 +88,7 @@ The default AdamW settings (`lr=1e-4`, weight decay 0.01, betas 0.9/0.95),
 documented reproduction assumptions and remain configurable in
 `configs/train/stage1.yaml`.
 
-## 3. Stage 2: foresight-conditioned diffusion policy — in progress
+## 3. Stage 2: foresight-conditioned diffusion policy — complete
 
 - [x] history-only, frozen Stage 1 foresight backbone;
 - [x] compact inference checkpoint without optimizer/EMA/reconstruction state;
@@ -144,9 +144,21 @@ action normalization, optimizer, scheduler, scaler, RNG, and exact data cursor
 are stored. Resume accepts a relocated but byte-identical foresight artifact
 and rejects different frozen weights.
 
-## 4. LIBERO rollout and evaluation — pending
+## 4. LIBERO rollout and evaluation — core implementation complete
 
-- online history buffer;
-- checkpoint selection and 20/50-rollout protocols;
-- task-level success metrics and videos;
-- modality, reconstruction, and attention ablations.
+- [x] inference-only raw/EMA Stage 2 checkpoint restoration;
+- [x] frozen foresight and DecisionNCE cache/checkpoint identity checks;
+- [x] online DecisionNCE encoding and padded six-step history buffer;
+- [x] configurable receding-horizon action-chunk execution;
+- [x] official fixed initial states and 50-rollout single-checkpoint protocol;
+- [x] resumable per-episode JSONL, task-level success metrics, and videos;
+- [ ] top-3 checkpoint retention/selection automation;
+- [ ] modality, reconstruction, and attention ablations.
+
+The default evaluation protocol follows the paper's single-checkpoint 50-rollout
+setting. The paper also reports a top-3-checkpoint average with 20 rollouts per
+checkpoint, but does not describe checkpoint selection. This reproduction can
+evaluate any retained checkpoint with 20 rollouts; automated selection remains
+future work. The paper likewise does not state how many actions from each
+six-action sample are executed before replanning. Executing all six is the
+documented default, while per-step replanning remains configurable.

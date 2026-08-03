@@ -24,7 +24,8 @@ avoids reading Stage 1 optimizer, target-encoder, and reconstruction state.
 
 ```bash
 conda activate clad
-cd /home/jack/practice/CLaD
+cd /path/to/CLaD_Reproduce
+export LIBERO_DATASET_DIR=/path/to/libero_datasets/libero_10
 
 ./scripts/train_stage2.sh
 ```
@@ -61,7 +62,7 @@ Run this before the 200K-step job:
 
 ```bash
 python scripts/train_clad_stage2.py \
-  --dataset-dir /data/jack/libero_datasets/libero_10 \
+  --dataset-dir "$LIBERO_DATASET_DIR" \
   --cache-dir .cache/decisionnce/libero_long \
   --foresight-checkpoint outputs/clad_stage1/stage1_foresight.pt \
   --output-dir outputs/clad_stage2_full_smoke \

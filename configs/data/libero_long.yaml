@@ -1,4 +1,5 @@
-dataset_dir: /data/jack/libero_datasets/libero_10
+# Override with --dataset-dir or set LIBERO_DATASET_DIR for the launch scripts.
+dataset_dir: /path/to/libero_datasets/libero_10
 file_pattern: "*_demo.hdf5"
 
 # Dataset paths are relative to each data/demo_N group. The paper-faithful

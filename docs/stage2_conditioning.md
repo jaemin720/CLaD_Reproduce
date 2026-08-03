@@ -49,7 +49,7 @@ larger. Export a compact frozen-foresight checkpoint once:
 
 ```bash
 conda activate clad
-cd /home/jack/practice/CLaD
+cd /path/to/CLaD_Reproduce
 
 python scripts/export_stage1_foresight.py \
   --source outputs/clad_stage1/stage1_latest.pt \

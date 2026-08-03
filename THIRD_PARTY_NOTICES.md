@@ -22,6 +22,26 @@ The CLaD adapter imports and calls DecisionNCE's public API. No DecisionNCE
 source file is copied into or relicensed as part of the Apache-2.0 parent
 package.
 
+## LIBERO
+
+- Project: `Lifelong-Robot-Learning/LIBERO`
+- Source: <https://github.com/Lifelong-Robot-Learning/LIBERO>
+- Pinned revision: `8f1084e3132a39270c3a13ebe37270a43ece2a01`
+- Source-code license: MIT
+- Upstream copyright: `Copyright (c) 2023 Lifelong Robot Learning`
+
+LIBERO is included as a Git submodule under `third_party/LIBERO`. Its source
+code remains under the upstream MIT license; it is not relicensed under the
+Apache-2.0 license of the parent project. The license is preserved in:
+
+- `third_party/LIBERO/LICENSE` when the submodule is initialized;
+- `LICENSES/LIBERO-MIT.txt` in the parent repository.
+
+LIBERO benchmark data are not committed or redistributed by this repository.
+The upstream project documents its benchmark data under CC BY 4.0. Dataset
+users remain responsible for reviewing and complying with the applicable
+upstream terms.
+
 ## Model checkpoints
 
 DecisionNCE and underlying CLIP checkpoints are not distributed by this
@@ -29,4 +49,3 @@ repository. They are downloaded or installed separately from their upstream
 locations. Model weights may have terms that differ from the source-code
 license; users must review and comply with the applicable upstream terms
 before use or redistribution.
-

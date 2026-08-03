@@ -24,15 +24,15 @@ paper:
 - [x] Stage 2 frozen foresight backbone and observation FiLM conditioning
 - [x] Stage 2 conditional diffusion policy and DDPM objective
 - [x] Stage 2 trainer and checkpointing
-- [ ] LIBERO-LONG rollout evaluation
+- [x] EMA policy loading and LIBERO-LONG rollout evaluation
 
 ## Local data layout
 
-The dataset is not copied into this repository. The default configuration
-expects:
+The dataset is not copied into this repository. Set its local absolute path
+before using the convenience training scripts:
 
-```text
-/data/jack/libero_datasets/libero_10/
+```bash
+export LIBERO_DATASET_DIR=/path/to/libero_datasets/libero_10
 ```
 
 Each training window uses one anchor step `t` and contains:
@@ -67,8 +67,13 @@ conda activate clad
 pip install -e ".[dev,train]"
 ```
 
-LIBERO remains an external environment dependency. DecisionNCE is pinned as a
-Git submodule so its source revision and MIT license are preserved explicitly.
+DecisionNCE and LIBERO are pinned as Git submodules so their source revisions
+and MIT licenses are preserved explicitly. LIBERO/MuJoCo packages are only
+needed for rollout evaluation; the training code does not import them.
+공식 LIBERO의 오래된 전체 requirements를 설치하지 않고 CLaD 환경을 보존하는
+절차는 [`docs/libero_installation.md`](docs/libero_installation.md)에 정리되어
+있습니다. 검증된 Linux-64/Python 3.10의 exact conda 및 pip resolution은
+[`locks/`](locks/)에 별도로 보존합니다.
 The environment pins `setuptools=80.9.0` because DecisionNCE's `openai-clip`
 dependency imports the legacy `pkg_resources` module, which was removed in
 setuptools 81.
@@ -77,13 +82,14 @@ If this repository was cloned without submodules, initialize it first:
 ```bash
 git submodule update --init --recursive
 pip install -e third_party/DecisionNCE
+pip install -C editable_mode=compat -e third_party/LIBERO
 ```
 
 Inspect the local LIBERO-LONG data:
 
 ```bash
 python scripts/inspect_dataset.py \
-  --dataset-dir /data/jack/libero_datasets/libero_10 \
+  --dataset-dir /path/to/libero_datasets/libero_10 \
   --horizon 6
 ```
 
@@ -107,7 +113,7 @@ standard cache, and build features with:
 
 ```bash
 python scripts/cache_decisionnce_features.py \
-  --dataset-dir /data/jack/libero_datasets/libero_10 \
+  --dataset-dir /path/to/libero_datasets/libero_10 \
   --cache-dir .cache/decisionnce/libero_long \
   --model-name DecisionNCE-T
 ```
@@ -137,6 +143,7 @@ Build the complete ten-task feature cache before starting the paper-scale run,
 then launch the single-GPU trainer with the convenience script:
 
 ```bash
+export LIBERO_DATASET_DIR=/path/to/libero_datasets/libero_10
 ./scripts/train_stage1.sh
 ```
 
@@ -185,12 +192,21 @@ checkpoint behavior are documented in
 [`docs/stage2_training.md`](docs/stage2_training.md).
 The paper-scale run starts with `./scripts/train_stage2.sh`.
 
+## LIBERO evaluation
+
+Stage 2 EMA restoration, online six-step history construction, fixed-state
+LIBERO rollout, resumable metrics, and evaluation commands are documented in
+[`docs/libero_evaluation.md`](docs/libero_evaluation.md). The default is the
+paper's single-checkpoint protocol of 50 rollouts per task. The minimal
+LIBERO/MuJoCo runtime pins and non-interactive path configuration are documented
+there; these packages are not imported by training or ordinary unit tests.
+
 ## Licensing
 
-Original code in this repository is Apache-2.0. DecisionNCE remains MIT
-licensed inside its Git submodule; its license text and attribution are
-preserved in `third_party/DecisionNCE/LICENSE`,
-`LICENSES/DecisionNCE-MIT.txt`, and `THIRD_PARTY_NOTICES.md`.
+Original code in this repository is Apache-2.0. DecisionNCE and LIBERO remain
+MIT licensed inside their Git submodules; their license texts and attributions
+are preserved under `third_party/`, `LICENSES/`, and
+`THIRD_PARTY_NOTICES.md`.
 
 Model checkpoints are not committed or redistributed by this repository.
 Their terms must be reviewed separately from the source-code licenses.

@@ -28,6 +28,19 @@ train = [
   "tqdm>=4.66,<5",
   "wandb>=0.17,<1",
 ]
+eval = [
+  "bddl==1.0.1",
+  "cloudpickle>=2.1,<4",
+  "easydict==1.9",
+  "future==0.18.2",
+  "gym==0.25.2",
+  "imageio>=2.34,<3",
+  "imageio-ffmpeg>=0.5,<1",
+  "matplotlib>=3.5,<4",
+  "mujoco==2.3.7",
+  "robosuite==1.4.0",
+  "termcolor>=2,<4",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -42,7 +55,7 @@ addopts = "-ra"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+extend-exclude = ["third_party"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-

@@ -1,0 +1,27 @@
+# Single-checkpoint protocol from the CLaD paper: 50 fixed-state rollouts
+# per task on LIBERO-LONG. Set task_ids to a subset for smoke tests.
+suite_name: libero_10
+task_order_index: 0
+task_ids: []
+rollouts_per_task: 50
+max_steps: 600
+
+# Official LIBERO evaluation settles physics with five zero actions. CLaD's
+# six-step history is left-padded by repeating the initial observation and
+# inserting zero actions until real history is available.
+warmup_steps: 5
+
+# The paper generates six-action chunks but does not state the deployment
+# replanning interval. Executing all six is the default reproduction choice;
+# set this to 1 for per-control-step receding-horizon replanning.
+execution_steps: 6
+
+camera_height: 128
+camera_width: 128
+seed: 42
+clip_actions: true
+save_videos: false
+video_fps: 20
+video_observation_key: agentview_image
+render_gpu_device_id: -1
+resume: true

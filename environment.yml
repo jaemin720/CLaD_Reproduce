@@ -1,3 +1,6 @@
+# Portable cross-machine specification. For the exact validated Linux/Python
+# resolution, see locks/conda-linux-64-explicit.txt and
+# locks/pip-linux-py310.constraints.txt.
 name: clad
 channels:
   - pytorch
@@ -18,11 +21,28 @@ dependencies:
   - pyyaml=6
   - pip:
       - einops>=0.7,<1
+      # LIBERO uses robosuite's 1.4-era SingleArm API. Keep these evaluation
+      # pins separate from its outdated full requirements.txt, which would
+      # downgrade NumPy, Hydra, OpenCV, and WandB in the training environment.
+      - bddl==1.0.1
+      - cloudpickle>=2.1,<4
+      - easydict==1.9
+      - future==0.18.2
+      - gym==0.25.2
       - hydra-core>=1.3,<2
+      - imageio>=2.34,<3
+      - imageio-ffmpeg>=0.5,<1
+      - matplotlib>=3.5,<4
+      - mujoco==2.3.7
       - omegaconf>=2.3,<3
       - pytest>=7.4,<9
+      - robosuite==1.4.0
       - ruff>=0.5,<1
+      - termcolor>=2,<4
       - tqdm>=4.66,<5
       - wandb>=0.17,<1
       - -e ./third_party/DecisionNCE
+      # Upstream LIBERO uses an implicit namespace package that modern PEP 660
+      # editable discovery misses. Compat mode preserves its documented layout.
+      - -e ./third_party/LIBERO --config-settings editable_mode=compat
       - -e .

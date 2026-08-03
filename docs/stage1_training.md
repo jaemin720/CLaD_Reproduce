@@ -1,8 +1,8 @@
 # Stage 1 학습 가이드
 
 이 문서는 CLaD의 Stage 1인 Cross-Modal Latent Dynamics를 LIBERO-LONG
-데이터로 학습하는 절차를 설명한다. 모든 명령은 프로젝트 루트인
-`/home/jack/practice/CLaD`에서 실행하는 것을 기준으로 한다.
+데이터로 학습하는 절차를 설명한다. 모든 명령은 clone한 프로젝트 루트에서
+실행하는 것을 기준으로 한다.
 
 ## 1. 학습 파이프라인
 
@@ -31,8 +31,9 @@ Stage 2 Diffusion Policy 학습
 Conda 환경을 활성화하고 CUDA가 PyTorch에서 인식되는지 확인한다.
 
 ```bash
-cd /home/jack/practice/CLaD
+cd /path/to/CLaD_Reproduce
 conda activate clad
+export LIBERO_DATASET_DIR=/path/to/libero_datasets/libero_10
 
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
@@ -52,7 +53,7 @@ pip install -e ".[dev,train]"
 
 ```bash
 python scripts/cache_decisionnce_features.py \
-  --dataset-dir /data/jack/libero_datasets/libero_10 \
+  --dataset-dir "$LIBERO_DATASET_DIR" \
   --cache-dir .cache/decisionnce/libero_long \
   --model-name DecisionNCE-T \
   --device cuda \
@@ -152,7 +153,7 @@ step을 실행할 수 있는지 확인한다.
 
 ```bash
 python scripts/train_clad_stage1.py \
-  --dataset-dir /data/jack/libero_datasets/libero_10 \
+  --dataset-dir "$LIBERO_DATASET_DIR" \
   --cache-dir .cache/decisionnce/libero_long_smoke \
   --file-pattern KITCHEN_SCENE3_turn_on_the_stove_and_put_the_moka_pot_on_it_demo.hdf5 \
   --output-dir outputs/clad_stage1_smoke \
@@ -199,7 +200,7 @@ python scripts/train_clad_stage1.py \
   --data-config configs/data/libero_long.yaml \
   --model-config configs/model/clad_stage1.yaml \
   --train-config configs/train/stage1.yaml \
-  --dataset-dir /data/jack/libero_datasets/libero_10 \
+  --dataset-dir "$LIBERO_DATASET_DIR" \
   --cache-dir .cache/decisionnce/libero_long \
   --output-dir outputs/clad_stage1 \
   --device cuda
@@ -282,7 +283,7 @@ python scripts/train_clad_stage1.py \
   --data-config configs/data/libero_long.yaml \
   --model-config configs/model/clad_stage1.yaml \
   --train-config configs/train/stage1.yaml \
-  --dataset-dir /data/jack/libero_datasets/libero_10 \
+  --dataset-dir "$LIBERO_DATASET_DIR" \
   --cache-dir .cache/decisionnce/libero_long \
   --output-dir outputs/clad_stage1 \
   --device cuda \
