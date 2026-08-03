@@ -4,7 +4,7 @@ import json
 from io import StringIO
 from pathlib import Path
 
-from clad.training import Stage1MetricLogger
+from clad.training import Stage1MetricLogger, Stage2MetricLogger
 
 
 def test_stage1_metric_logger_saves_jsonl_and_prints_compact_line(
@@ -63,3 +63,29 @@ def test_stage1_metric_logger_saves_jsonl_and_prints_compact_line(
     assert saved_config["run_id"] == "test-run"
     assert saved_config["trainer_config"]["batch_size"] == 128
     assert saved_config["output_dir"] == str(tmp_path)
+
+
+def test_stage2_metric_logger_uses_stage2_prefix(tmp_path: Path) -> None:
+    console = StringIO()
+    logger = Stage2MetricLogger(
+        output_dir=tmp_path,
+        max_steps=200_000,
+        console=console,
+        run_id="stage2-test",
+    )
+    logger.start(0)
+    logger(
+        {
+            "step": 10.0,
+            "attempt_step": 10.0,
+            "loss": 0.75,
+            "gradient_norm": 2.0,
+            "learning_rate": 1e-4,
+            "amp_scale": 2048.0,
+            "skipped_optimizer_steps": 0.0,
+            "optimizer_step_skipped": 0.0,
+        }
+    )
+    logger.close()
+
+    assert console.getvalue().startswith("[Stage2]    10/200000")

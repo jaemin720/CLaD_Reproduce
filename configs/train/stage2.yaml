@@ -1,0 +1,36 @@
+# Paper-reported Stage 2 settings.
+max_steps: 200000
+batch_size: 128
+
+# Reproduction assumptions. The CLaD paper does not publish Stage 2 optimizer,
+# precision, scheduler, EMA, clipping, or checkpoint settings. Optimizer and
+# EMA defaults follow the public Diffusion Policy training configuration.
+gradient_accumulation_steps: 1
+learning_rate: 1.0e-4
+weight_decay: 1.0e-6
+beta1: 0.95
+beta2: 0.999
+optimizer_epsilon: 1.0e-8
+warmup_steps: 500
+min_lr_ratio: 0.01
+max_grad_norm: 1.0
+
+amp_enabled: true
+amp_dtype: float16
+amp_init_scale: 2048.0
+max_consecutive_optimizer_skips: 16
+
+ema_enabled: true
+ema_update_after_step: 0
+ema_inv_gamma: 1.0
+ema_power: 0.75
+ema_min_decay: 0.0
+ema_max_decay: 0.9999
+
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+log_interval: 10
+checkpoint_interval: 5000
+save_final_checkpoint: true
+seed: 42

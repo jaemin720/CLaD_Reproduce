@@ -16,6 +16,7 @@ from clad.data import (
     FeatureCacheSpec,
     LiberoDatasetConfig,
     LiberoWindowDataset,
+    compute_libero_action_bounds,
 )
 from clad.models import (
     CLaDInputEncoderConfig,
@@ -80,7 +81,11 @@ def _build_cache(dataset_dir: Path, cache_dir: Path) -> None:
     builder.build(dataset_dir=dataset_dir, cache_dir=cache_dir)
 
 
-def _cached_dataset(tmp_path: Path) -> CachedLiberoWindowDataset:
+def _cached_dataset(
+    tmp_path: Path,
+    *,
+    include_future_features: bool = True,
+) -> CachedLiberoWindowDataset:
     dataset_dir = tmp_path / "dataset"
     cache_dir = tmp_path / "cache"
     dataset_dir.mkdir()
@@ -97,6 +102,7 @@ def _cached_dataset(tmp_path: Path) -> CachedLiberoWindowDataset:
     return CachedLiberoWindowDataset(
         base_dataset=base,
         feature_cache=DecisionNCEFeatureCache(cache_dir),
+        include_future_features=include_future_features,
     )
 
 
@@ -153,6 +159,25 @@ def test_cached_dataset_aligns_features_to_window(tmp_path: Path) -> None:
             sample["vision_features"]["eye_in_hand_rgb"]["now"],
             torch.full((4,), 11.0, dtype=torch.float16),
         )
+    finally:
+        dataset.close()
+
+
+def test_stage2_cache_view_skips_future_feature_and_computes_action_bounds(
+    tmp_path: Path,
+) -> None:
+    dataset = _cached_dataset(tmp_path, include_future_features=False)
+    try:
+        sample = dataset[0]
+        bounds = compute_libero_action_bounds(
+            dataset.base_dataset,
+            expected_action_dim=2,
+        )
+
+        assert set(sample["vision_features"]["agentview_rgb"]) == {"prev", "now"}
+        torch.testing.assert_close(bounds.minimum, torch.tensor([0.0, 0.5]))
+        torch.testing.assert_close(bounds.maximum, torch.tensor([4.0, 4.5]))
+        assert bounds.count == 5
     finally:
         dataset.close()
 

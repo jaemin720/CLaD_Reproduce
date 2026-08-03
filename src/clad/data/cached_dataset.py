@@ -20,7 +20,8 @@ class CachedLiberoWindowDataset(Dataset[dict[str, Any]]):
     ``text_feature``
         One cached language feature for the task.
     ``vision_features[view][prev|now|future]``
-        Cached image features aligned to the same episode-safe window.
+        Cached image features aligned to the same episode-safe window. Stage 2
+        may disable the future entry because it has no future-state target.
     """
 
     def __init__(
@@ -28,6 +29,7 @@ class CachedLiberoWindowDataset(Dataset[dict[str, Any]]):
         *,
         base_dataset: LiberoWindowDataset,
         feature_cache: DecisionNCEFeatureCache,
+        include_future_features: bool = True,
     ) -> None:
         super().__init__()
         if base_dataset.config.include_images:
@@ -37,6 +39,7 @@ class CachedLiberoWindowDataset(Dataset[dict[str, Any]]):
 
         self.base_dataset = base_dataset
         self.feature_cache = feature_cache
+        self.include_future_features = include_future_features
         self.camera_keys = normalize_camera_keys(base_dataset.config.camera_keys)
         self.view_names = tuple(camera_view_name(key) for key in self.camera_keys)
         self._validate_coverage()
@@ -66,8 +69,9 @@ class CachedLiberoWindowDataset(Dataset[dict[str, Any]]):
         horizon = self.base_dataset.config.horizon
 
         sample["text_feature"] = self.feature_cache.text_feature(task_id)
-        sample["vision_features"] = {
-            view_name: {
+        sample["vision_features"] = {}
+        for view_name in self.view_names:
+            timeline = {
                 "prev": self.feature_cache.image_feature(
                     task_id=task_id,
                     demo_key=demo_key,
@@ -80,15 +84,15 @@ class CachedLiberoWindowDataset(Dataset[dict[str, Any]]):
                     view_name=view_name,
                     index=anchor,
                 ),
-                "future": self.feature_cache.image_feature(
+            }
+            if self.include_future_features:
+                timeline["future"] = self.feature_cache.image_feature(
                     task_id=task_id,
                     demo_key=demo_key,
                     view_name=view_name,
                     index=anchor + horizon,
-                ),
-            }
-            for view_name in self.view_names
-        }
+                )
+            sample["vision_features"][view_name] = timeline
         return sample
 
     def close(self) -> None:

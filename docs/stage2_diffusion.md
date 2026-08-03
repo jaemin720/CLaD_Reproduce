@@ -15,8 +15,9 @@ predicted noise:           [B, 6, 7]
 loss:                      MSE(predicted noise, epsilon)
 ```
 
-The next implementation is the optimizer, EMA policy copy, checkpointing,
-logging, and 200K-step Stage 2 trainer.
+The optimizer, trainable-policy EMA, checkpointing, logging, and 200K-step
+Stage 2 trainer are implemented. The next step is a full-architecture GPU
+smoke test before launching the paper-scale run.
 
 ## Architecture assumptions
 
@@ -65,8 +66,8 @@ in Stage 2 checkpoints.
 The inspected LIBERO-LONG demonstrations are already globally bounded by
 `[-1, 1]`, but several rotation dimensions occupy much narrower ranges.
 Per-dimension fitting preserves their useful numerical resolution. The Stage 2
-trainer will compute these bounds from the training dataset before the first
-optimizer step.
+trainer computes these bounds from the source episodes before the first
+optimizer step and persists the resulting normalizer in its checkpoint.
 
 ## Implemented interfaces
 

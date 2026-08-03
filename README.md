@@ -23,7 +23,7 @@ paper:
 - [x] Stage 1 25K-step trainer and checkpointing
 - [x] Stage 2 frozen foresight backbone and observation FiLM conditioning
 - [x] Stage 2 conditional diffusion policy and DDPM objective
-- [ ] Stage 2 trainer and checkpointing
+- [x] Stage 2 trainer and checkpointing
 - [ ] LIBERO-LONG rollout evaluation
 
 ## Local data layout
@@ -179,6 +179,10 @@ loading example are documented in
 The foresight-conditioned 1D U-Net, cosine DDPM schedule, action normalizer,
 equation (22) loss, and six-action reverse sampler are described in
 [`docs/stage2_diffusion.md`](docs/stage2_diffusion.md).
+
+Stage 2 optimizer/EMA assumptions, launch commands, logging, and exact-resume
+checkpoint behavior are documented in
+[`docs/stage2_training.md`](docs/stage2_training.md).
 
 ## Licensing
 

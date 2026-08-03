@@ -16,6 +16,8 @@ from typing import Any, TextIO
 class Stage1MetricLogger:
     """Append complete JSONL metrics while printing one compact status line."""
 
+    stage_label = "Stage1"
+
     def __init__(
         self,
         *,
@@ -123,7 +125,7 @@ class Stage1MetricLogger:
         rate = f"{seconds_per_step:.3f}s/step" if seconds_per_step is not None else "--s/step"
         attempt_text = f" | try {attempt}" if attempt != step else ""
         line = (
-            f"[Stage1] {step:>5}/{self.max_steps} ({progress:>5.1f}%) | "
+            f"[{self.stage_label}] {step:>5}/{self.max_steps} ({progress:>5.1f}%) | "
             f"ETA {self._duration(eta_seconds)} | {rate}{attempt_text} | "
             f"loss {self._number(metrics.get('loss', math.nan))} | "
             f"grad {metrics.get('gradient_norm', math.nan):.3g} | "
@@ -141,3 +143,9 @@ class Stage1MetricLogger:
 
     def __exit__(self, *_: object) -> None:
         self.close()
+
+
+class Stage2MetricLogger(Stage1MetricLogger):
+    """Stage 2 variant with the same durable JSONL and ETA behavior."""
+
+    stage_label = "Stage2"

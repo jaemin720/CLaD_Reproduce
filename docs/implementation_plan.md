@@ -95,7 +95,7 @@ documented reproduction assumptions and remain configurable in
 - [x] current-observation-modulated proprioceptive and semantic foresight;
 - [x] conditional 1D U-Net and DDPM action-noise objective;
 - [x] six-step, seven-dimensional action sampling;
-- [ ] optimizer, checkpointing, and 200K-step trainer.
+- [x] optimizer, EMA, checkpointing, and 200K-step trainer.
 
 The paper does not specify the architecture of the modality encoders in
 equation (20), the FiLM networks in equation (21), or the diffusion denoiser.
@@ -128,6 +128,21 @@ then cropped back to six. As in Diffusion Policy, actions are normalized per
 dimension to `[-1, 1]`; normalization statistics must be fitted from the
 training split and are persistent policy buffers. The next trainer step will
 compute those statistics and store them in every Stage 2 checkpoint.
+
+`Stage2Trainer` uses successful optimizer updates for the paper's 200K-step
+budget, with AMP overflow attempts tracked separately. Its resumable sampler,
+RNG restoration, cosine schedule, gradient clipping, atomic latest checkpoint,
+compact console ETA, and JSONL metrics follow the proven Stage 1 trainer
+contract. The paper does not publish Stage 2 optimizer or EMA details, so the
+defaults follow public Diffusion Policy practice: AdamW at `1e-4`, betas
+`0.95/0.999`, weight decay `1e-6`, 500-step warmup, and warmup EMA with power
+`0.75` capped at `0.9999`.
+
+Stage 2 checkpoints reference the frozen foresight artifact by size and SHA256
+instead of embedding it. Only the trainable FiLM/U-Net parameters, their EMA,
+action normalization, optimizer, scheduler, scaler, RNG, and exact data cursor
+are stored. Resume accepts a relocated but byte-identical foresight artifact
+and rejects different frozen weights.
 
 ## 4. LIBERO rollout and evaluation — pending
 
