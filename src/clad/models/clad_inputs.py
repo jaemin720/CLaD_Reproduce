@@ -70,10 +70,10 @@ class ActionTokenOutput:
 class FeatureFiLM(nn.Module):
     """Fuse frozen image and language features with affine modulation.
 
-    The paper uses one image view. For forward compatibility, image features
-    may also be supplied as ``[B, V, D]`` or a mapping of view name to
-    ``[B, D]``. Multiple views are mean-fused before FiLM; the one-view result
-    is unchanged.
+    The paper does not report its camera-view count. This reproduction defaults
+    to one view but accepts image features as ``[B, V, D]`` or a mapping of view
+    name to ``[B, D]``. Multiple views are mean-fused before FiLM; the one-view
+    result is unchanged.
     """
 
     def __init__(

@@ -2,9 +2,10 @@
 dataset_dir: /path/to/libero_datasets/libero_10
 file_pattern: "*_demo.hdf5"
 
-# Dataset paths are relative to each data/demo_N group. The paper-faithful
-# default uses one external view. Add obs/eye_in_hand_rgb for multi-view
-# experiments without changing the dataset interface.
+# Dataset paths are relative to each data/demo_N group. The paper does not
+# report its camera-view count; one external view is this reproduction's
+# explicit default. Add obs/eye_in_hand_rgb for multi-view experiments without
+# changing the dataset interface.
 camera_keys:
   - obs/agentview_rgb
 proprio_key: robot_states

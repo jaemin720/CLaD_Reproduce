@@ -62,11 +62,12 @@ Images use a view-indexed structure even in the default single-camera mode:
 sample["images"]["agentview_rgb"]["prev" | "now" | "future"]
 ```
 
-The default configuration contains only `obs/agentview_rgb`, matching the
-single-image formulation in the paper. A future multi-view experiment can add
+The paper does not specify how many camera views are used. This reproduction
+therefore treats the single `obs/agentview_rgb` default as an explicit
+assumption, not a paper-reported setting. A multi-view experiment can add
 `obs/eye_in_hand_rgb` to `camera_keys` without changing the dataset or batch
-interface. View fusion belongs to the DecisionNCE model adapter rather than the
-HDF5 loader.
+interface. DecisionNCE encodes each view independently, and the CLaD semantic
+input encoder performs configurable view fusion rather than the HDF5 loader.
 
 ## Development setup
 
