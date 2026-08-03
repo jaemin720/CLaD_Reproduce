@@ -13,8 +13,8 @@ remain frozen. The implemented bridge covers equations (20)--(21):
    a trainable FiLM layer;
 4. concatenate `g_p` and `g_s` for the action denoiser.
 
-The conditional denoiser, diffusion schedule, DDPM loss, and Stage 2 trainer
-are the next implementation step.
+The conditional denoiser, diffusion schedule, DDPM loss, and reverse sampler
+are now implemented. The Stage 2 trainer is the next implementation step.
 
 ## Reproduction assumptions
 

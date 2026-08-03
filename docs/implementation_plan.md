@@ -93,8 +93,8 @@ documented reproduction assumptions and remain configurable in
 - [x] history-only, frozen Stage 1 foresight backbone;
 - [x] compact inference checkpoint without optimizer/EMA/reconstruction state;
 - [x] current-observation-modulated proprioceptive and semantic foresight;
-- [ ] conditional 1D U-Net and DDPM action-noise objective;
-- [ ] six-step, seven-dimensional action sampling;
+- [x] conditional 1D U-Net and DDPM action-noise objective;
+- [x] six-step, seven-dimensional action sampling;
 - [ ] optimizer, checkpointing, and 200K-step trainer.
 
 The paper does not specify the architecture of the modality encoders in
@@ -113,6 +113,21 @@ load the Stage 1 EMA targets, reconstruction heads, or objective, and it
 always disables stochastic action masking. It accepts the same per-camera
 feature mapping used in Stage 1, so the current one-camera configuration can
 be extended later without changing the Stage 2 batch contract.
+
+Equation (22) uses a native conditional 1D U-Net implementation based on the
+published Diffusion Policy design: GroupNorm/Mish residual blocks, global
+scale-and-shift conditioning, sinusoidal diffusion-step embeddings, and a
+100-step squared-cosine DDPM. The CLaD paper does not report these details.
+Widths `[512, 1024, 1536]` produce 227.4M denoiser parameters; together with
+the 4.2M trainable observation-FiLM parameters, Stage 2 has approximately
+231.6M trainable parameters, matching the paper's rounded 0.23B policy budget.
+
+The external action horizon remains six. Internally, the temporal axis is
+right-padded from six to eight so two stride-2 U-Net levels are shape-safe,
+then cropped back to six. As in Diffusion Policy, actions are normalized per
+dimension to `[-1, 1]`; normalization statistics must be fitted from the
+training split and are persistent policy buffers. The next trainer step will
+compute those statistics and store them in every Stage 2 checkpoint.
 
 ## 4. LIBERO rollout and evaluation — pending
 

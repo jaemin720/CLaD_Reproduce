@@ -22,7 +22,8 @@ paper:
 - [x] Stage 1 cache-backed dataset and composed model
 - [x] Stage 1 25K-step trainer and checkpointing
 - [x] Stage 2 frozen foresight backbone and observation FiLM conditioning
-- [ ] Stage 2 diffusion policy and trainer
+- [x] Stage 2 conditional diffusion policy and DDPM objective
+- [ ] Stage 2 trainer and checkpointing
 - [ ] LIBERO-LONG rollout evaluation
 
 ## Local data layout
@@ -174,6 +175,10 @@ using its frozen latent foresights in the observation-conditioned FiLM bridge
 from equations (20)--(21). The architecture assumptions, export command, and
 loading example are documented in
 [`docs/stage2_conditioning.md`](docs/stage2_conditioning.md).
+
+The foresight-conditioned 1D U-Net, cosine DDPM schedule, action normalizer,
+equation (22) loss, and six-action reverse sampler are described in
+[`docs/stage2_diffusion.md`](docs/stage2_diffusion.md).
 
 ## Licensing
 

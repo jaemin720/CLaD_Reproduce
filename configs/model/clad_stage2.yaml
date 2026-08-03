@@ -7,5 +7,23 @@ conditioning:
   observation_pooling: mean
   film_dropout: 0.0
 
-# The conditioned diffusion policy and its schedule will be added in the next
-# implementation step. Those settings stay separate from this frozen bridge.
+# Equation (22). The paper reports only the 0.23B policy size and does not
+# publish the denoiser widths or DDPM schedule. This uses the public Diffusion
+# Policy design (global condition, GroupNorm/Mish conditional 1D U-Net and a
+# 100-step squared-cosine DDPM). These widths yield about 227.4M denoiser
+# parameters; together with the two trainable Stage 2 FiLM layers, the policy
+# has about 231.6M parameters, matching the reported 0.23B budget.
+diffusion:
+  action_dim: 7
+  horizon: 6
+  condition_dim_per_modality: 1024
+  diffusion_step_embed_dim: 256
+  down_dims: [512, 1024, 1536]
+  kernel_size: 5
+  num_groups: 8
+  condition_predict_scale: true
+  num_train_timesteps: 100
+  beta_schedule: squaredcos_cap_v2
+  cosine_s: 0.008
+  max_beta: 0.999
+  clip_sample: true
