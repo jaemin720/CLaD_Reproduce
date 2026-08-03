@@ -183,6 +183,7 @@ equation (22) loss, and six-action reverse sampler are described in
 Stage 2 optimizer/EMA assumptions, launch commands, logging, and exact-resume
 checkpoint behavior are documented in
 [`docs/stage2_training.md`](docs/stage2_training.md).
+The paper-scale run starts with `./scripts/train_stage2.sh`.
 
 ## Licensing
 

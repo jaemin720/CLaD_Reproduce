@@ -26,17 +26,21 @@ avoids reading Stage 1 optimizer, target-encoder, and reconstruction state.
 conda activate clad
 cd /home/jack/practice/CLaD
 
-python scripts/train_clad_stage2.py \
-  --dataset-dir /data/jack/libero_datasets/libero_10 \
-  --cache-dir .cache/decisionnce/libero_long \
-  --foresight-checkpoint outputs/clad_stage1/stage1_foresight.pt \
-  --output-dir outputs/clad_stage2 \
-  --device cuda
+./scripts/train_stage2.sh
 ```
 
 The defaults come from `configs/model/clad_stage2.yaml` and
 `configs/train/stage2.yaml`: 200,000 successful optimizer updates, batch size
-128, the approximately 0.23B policy, fp16 AMP, and policy EMA.
+128, the approximately 0.23B policy, fp16 AMP, and policy EMA. Complete
+console output is also appended to `outputs/clad_stage2/train_console.log`.
+
+Additional CLI overrides are passed through. For example, resume the same run
+with:
+
+```bash
+./scripts/train_stage2.sh \
+  --resume outputs/clad_stage2/stage2_latest.pt
+```
 
 ## What happens before the first step
 
@@ -102,15 +106,11 @@ does not duplicate the 1.24 GiB frozen CLaD state. It contains:
 - exact shuffled-data cursor and optimizer/skip counters;
 - SHA256 identity of the required frozen foresight artifact.
 
-Resume with the identical configs and byte-identical foresight artifact:
+The convenience script resumes with the identical configs and byte-identical
+foresight artifact:
 
 ```bash
-python scripts/train_clad_stage2.py \
-  --dataset-dir /data/jack/libero_datasets/libero_10 \
-  --cache-dir .cache/decisionnce/libero_long \
-  --foresight-checkpoint outputs/clad_stage1/stage1_foresight.pt \
-  --output-dir outputs/clad_stage2 \
-  --device cuda \
+./scripts/train_stage2.sh \
   --resume outputs/clad_stage2/stage2_latest.pt
 ```
 
