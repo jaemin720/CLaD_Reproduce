@@ -21,7 +21,8 @@ paper:
 - [x] Stage 1 latent foresight, EMA targets, and reconstruction objective
 - [x] Stage 1 cache-backed dataset and composed model
 - [x] Stage 1 25K-step trainer and checkpointing
-- [ ] Stage 2 diffusion policy
+- [x] Stage 2 frozen foresight backbone and observation FiLM conditioning
+- [ ] Stage 2 diffusion policy and trainer
 - [ ] LIBERO-LONG rollout evaluation
 
 ## Local data layout
@@ -165,6 +166,14 @@ For a fast plumbing check, the CLI also accepts `--max-steps`, `--batch-size`,
 `--attention-layers`, `--num-workers`, and checkpoint/AMP overrides. These
 change the reproduction configuration and are intended for smoke tests or
 resource-constrained experiments, not the reported run.
+
+## Stage 2 conditioning
+
+Stage 2 starts by exporting a compact, inference-only CLaD checkpoint and
+using its frozen latent foresights in the observation-conditioned FiLM bridge
+from equations (20)--(21). The architecture assumptions, export command, and
+loading example are documented in
+[`docs/stage2_conditioning.md`](docs/stage2_conditioning.md).
 
 ## Licensing
 

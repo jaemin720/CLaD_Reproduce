@@ -1,0 +1,11 @@
+# Equations (20)--(21): current-observation-modulated latent foresight.
+#
+# The paper does not publish the observation encoder or FiLM architecture.
+# This reproduction reuses and freezes the trained Stage 1 proprio/semantic
+# encoders, mean-pools their tokens, and trains one affine FiLM per modality.
+conditioning:
+  observation_pooling: mean
+  film_dropout: 0.0
+
+# The conditioned diffusion policy and its schedule will be added in the next
+# implementation step. Those settings stay separate from this frozen bridge.

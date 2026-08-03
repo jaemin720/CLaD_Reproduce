@@ -24,7 +24,7 @@ real LIBERO-LONG task. Its observed image and text feature dimensions are both
 the downloaded checkpoint is not redistributed from this Apache-2.0 parent
 repository.
 
-## 2. Stage 1: Cross-Modal Latent Dynamics — in progress
+## 2. Stage 1: Cross-Modal Latent Dynamics — complete
 
 - [x] semantic FiLM fusion of cached image and text features;
 - [x] proprioceptive, semantic, and action tokenizers;
@@ -88,12 +88,31 @@ The default AdamW settings (`lr=1e-4`, weight decay 0.01, betas 0.9/0.95),
 documented reproduction assumptions and remain configurable in
 `configs/train/stage1.yaml`.
 
-## 3. Stage 2: foresight-conditioned diffusion policy — pending
+## 3. Stage 2: foresight-conditioned diffusion policy — in progress
 
-- freeze DecisionNCE and Stage 1 CLaD;
-- observation-modulated foresight through FiLM;
-- conditional 1D U-Net and DDPM action-noise objective;
-- six-step, seven-dimensional action chunks.
+- [x] history-only, frozen Stage 1 foresight backbone;
+- [x] compact inference checkpoint without optimizer/EMA/reconstruction state;
+- [x] current-observation-modulated proprioceptive and semantic foresight;
+- [ ] conditional 1D U-Net and DDPM action-noise objective;
+- [ ] six-step, seven-dimensional action sampling;
+- [ ] optimizer, checkpointing, and 200K-step trainer.
+
+The paper does not specify the architecture of the modality encoders in
+equation (20), the FiLM networks in equation (21), or the diffusion denoiser.
+For equation (20), this reproduction reuses the trained online Stage 1
+proprioceptive and semantic encoders and freezes them with the rest of CLaD.
+Their four state tokens are mean-pooled into one `H`-dimensional current
+observation embedding. Each modality then has a separate, trainable affine
+FiLM layer initialized to the identity. Consequently, Stage 2 starts from the
+learned foresights without perturbing them and learns how current context
+should adjust each modality.
+
+The inference backbone contains only `inputs`, modality transitions,
+cross-modal dynamics, and the foresight predictor. It does not construct or
+load the Stage 1 EMA targets, reconstruction heads, or objective, and it
+always disables stochastic action masking. It accepts the same per-camera
+feature mapping used in Stage 1, so the current one-camera configuration can
+be extended later without changing the Stage 2 batch contract.
 
 ## 4. LIBERO rollout and evaluation — pending
 

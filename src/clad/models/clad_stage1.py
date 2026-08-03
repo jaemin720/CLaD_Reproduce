@@ -86,6 +86,37 @@ class CLaDStage1Config:
             foresight=ForesightConfig(**foresight_kwargs),
         )
 
+    @classmethod
+    def from_checkpoint_mapping(
+        cls,
+        values: Mapping[str, Any],
+    ) -> CLaDStage1Config:
+        """Reconstruct the nested config stored by :class:`Stage1Trainer`.
+
+        The human-authored YAML keeps input settings at the top level, while
+        checkpoints serialize this dataclass as three explicit nested
+        mappings. Keeping the two parsing paths separate makes accidental
+        config-format mixing fail loudly.
+        """
+
+        expected = {"inputs", "attention", "foresight"}
+        unknown = sorted(set(values) - expected)
+        missing = sorted(expected - set(values))
+        if missing or unknown:
+            raise ValueError(
+                "Stage 1 checkpoint model_config must contain exactly "
+                f"{sorted(expected)}; missing={missing}, unknown={unknown}"
+            )
+        nested = {name: values[name] for name in expected}
+        for name, value in nested.items():
+            if not isinstance(value, Mapping):
+                raise TypeError(f"Checkpoint model_config[{name!r}] must be a mapping")
+        return cls(
+            inputs=CLaDInputEncoderConfig(**dict(nested["inputs"])),
+            attention=CrossAttentionConfig(**dict(nested["attention"])),
+            foresight=ForesightConfig(**dict(nested["foresight"])),
+        )
+
     def __post_init__(self) -> None:
         hidden_dimensions = {
             self.inputs.hidden_dim,
