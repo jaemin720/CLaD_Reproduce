@@ -132,15 +132,16 @@ reproduction assumption rather than a confirmed paper detail.
 [`docs/stage1_training.md`](docs/stage1_training.md)에 정리되어 있다.
 
 Build the complete ten-task feature cache before starting the paper-scale run,
-then launch the single-GPU trainer:
+then launch the single-GPU trainer with the convenience script:
 
 ```bash
-python scripts/train_clad_stage1.py \
-  --dataset-dir /data/jack/libero_datasets/libero_10 \
-  --cache-dir .cache/decisionnce/libero_long \
-  --output-dir outputs/clad_stage1 \
-  --device cuda
+./scripts/train_stage1.sh
 ```
+
+The console displays compact one-line progress with smoothed step time and
+ETA. Full metrics are appended to
+`outputs/clad_stage1/train_metrics.jsonl`, the resolved configuration is saved
+per run, and the complete console output is appended to `train_console.log`.
 
 The defaults in `configs/train/stage1.yaml` use the paper-reported 25,000
 optimization steps and batch size 128. AdamW, a 500-step warmup followed by
@@ -156,9 +157,7 @@ weights, optimizer, scheduler, AMP scaler, RNG, exact shuffled data position,
 and global step. Resume the same run configuration with:
 
 ```bash
-python scripts/train_clad_stage1.py \
-  --cache-dir .cache/decisionnce/libero_long \
-  --output-dir outputs/clad_stage1 \
+./scripts/train_stage1.sh \
   --resume outputs/clad_stage1/stage1_latest.pt
 ```
 

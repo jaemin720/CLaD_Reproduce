@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from collections.abc import Mapping
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -20,7 +19,12 @@ from clad.data import (
     LiberoWindowDataset,
 )
 from clad.models import CLaDStage1Config, CLaDStage1Model
-from clad.training import Stage1Trainer, Stage1TrainerConfig, build_stage1_dataloader
+from clad.training import (
+    Stage1MetricLogger,
+    Stage1Trainer,
+    Stage1TrainerConfig,
+    build_stage1_dataloader,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -166,6 +170,7 @@ def main() -> None:
         base_dataset=base_dataset,
         feature_cache=DecisionNCEFeatureCache(args.cache_dir),
     )
+    metric_logger: Stage1MetricLogger | None = None
     try:
         dataloader = build_stage1_dataloader(
             dataset,
@@ -173,42 +178,67 @@ def main() -> None:
             generator=generator,
         )
         model = CLaDStage1Model(model_config)
+        parameter_counts = _parameter_counts(model)
+        metric_logger = Stage1MetricLogger(
+            output_dir=args.output_dir,
+            max_steps=trainer_config.max_steps,
+        )
         trainer = Stage1Trainer(
             model=model,
             dataloader=dataloader,
             config=trainer_config,
             device=device,
             output_dir=args.output_dir,
+            metric_callback=metric_logger,
         )
         if args.resume is not None:
             resumed_step = trainer.load_checkpoint(args.resume)
-            print(f"resumed checkpoint at step {resumed_step}", flush=True)
+            print(f"Resumed checkpoint at optimizer step {resumed_step}.", flush=True)
+        metric_logger.start(trainer.global_step)
 
         run_summary = {
+            "starting_global_step": trainer.global_step,
+            "starting_attempt_step": trainer.attempt_step,
             "dataset_windows": len(dataset),
             "device": str(device),
+            "dataset_config": asdict(dataset_config),
             "model_config": asdict(model_config),
             "trainer_config": asdict(trainer_config),
-            **_parameter_counts(model),
+            "cache_dir": str(args.cache_dir.expanduser().resolve()),
+            "output_dir": str(Path(args.output_dir).expanduser().resolve()),
+            "resume": str(args.resume.expanduser().resolve()) if args.resume else None,
+            **parameter_counts,
         }
-        print(json.dumps(run_summary, sort_keys=True), flush=True)
+        config_path = metric_logger.write_run_config(run_summary)
+        effective_batch_size = (
+            trainer_config.batch_size * trainer_config.gradient_accumulation_steps
+        )
+        print("CLaD Stage 1 training", flush=True)
+        print(
+            f"  device={device} | windows={len(dataset):,} | "
+            f"trainable_params={parameter_counts['parameters_trainable']:,}",
+            flush=True,
+        )
+        print(
+            f"  steps={trainer_config.max_steps:,} | "
+            f"micro_batch={trainer_config.batch_size} | "
+            f"accumulation={trainer_config.gradient_accumulation_steps} | "
+            f"effective_batch={effective_batch_size}",
+            flush=True,
+        )
+        print(f"  metrics={metric_logger.metrics_path}", flush=True)
+        print(f"  config={config_path}", flush=True)
         result = trainer.train()
         print(
-            json.dumps(
-                {
-                    "completed_step": result.global_step,
-                    "attempt_step": result.attempt_step,
-                    "skipped_optimizer_steps": result.skipped_optimizer_steps,
-                    "checkpoint": (
-                        str(result.checkpoint_path) if result.checkpoint_path is not None else None
-                    ),
-                    "latest_metrics": result.latest_metrics,
-                },
-                sort_keys=True,
-            ),
+            "Stage 1 finished | "
+            f"step={result.global_step} | attempts={result.attempt_step} | "
+            f"skips={result.skipped_optimizer_steps} | "
+            f"checkpoint={result.checkpoint_path}",
             flush=True,
         )
     finally:
+        if metric_logger is not None:
+            metric_logger.close()
         dataset.close()
 
 

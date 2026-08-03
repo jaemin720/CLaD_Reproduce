@@ -185,7 +185,14 @@ skip이 `max_consecutive_optimizer_skips`에 도달하면 무한 반복하는 �
 
 ## 6. Stage 1 본 학습
 
-10-task 캐시와 기본 설정으로 학습한다.
+10-task 캐시와 기본 설정으로 학습한다. `clad` Conda 환경을 활성화한 뒤 다음
+shell script를 실행하는 것이 가장 간단하다.
+
+```bash
+./scripts/train_stage1.sh
+```
+
+이 script는 아래 Python 명령을 실행하면서 콘솔 출력을 자동으로 저장한다.
 
 ```bash
 python scripts/train_clad_stage1.py \
@@ -198,13 +205,41 @@ python scripts/train_clad_stage1.py \
   --device cuda
 ```
 
+추가한 인자는 Python 학습 명령으로 그대로 전달된다. 예를 들어 다른 학습
+설정 파일을 사용하려면 다음처럼 실행한다.
+
+```bash
+./scripts/train_stage1.sh --train-config configs/train/stage1_local.yaml
+```
+
 별도 설정을 만들었다면 `--train-config configs/train/stage1_local.yaml`로
 바꾼다. 명령행에서 지정한 `--max-steps`, `--batch-size`,
 `--gradient-accumulation-steps` 등의 값은 YAML 설정보다 우선한다. 본 실험은
 재현성을 위해 YAML 파일에 값을 고정하고 일시적인 smoke test에만 명령행
 override를 사용하는 것을 권장한다.
 
-학습 로그는 `log_interval`마다 다음 항목을 JSON으로 출력한다.
+콘솔에는 `log_interval`마다 다음과 같은 한 줄만 출력된다.
+
+```text
+[Stage1]    10/25000 (  0.0%) | ETA 02:17:24 | 0.330s/step | loss 12.2339 | grad 91.9 | lr 5.050e-05 | amp 2048 | skips 0 | ok
+```
+
+ETA는 성공한 optimizer step의 소요 시간을 지수 이동 평균으로 평활화해
+계산한다. AMP skip과 checkpoint 저장에 걸린 시간도 이후 관측 구간에
+포함된다. 학습 초반 몇 번의 출력은 표본이 적어 ETA 변동이 클 수 있으며,
+진행할수록 안정된다. 실제 시도 횟수가 성공 step과 다를 때만 `try` 항목을
+추가로 표시한다.
+
+전체 수치는 다음 파일에 보존된다.
+
+- `outputs/clad_stage1/train_console.log`: 오류를 포함한 전체 콘솔 출력
+- `outputs/clad_stage1/train_metrics.jsonl`: 손실과 모든 진단 metric
+- `outputs/clad_stage1/run_config_<run-id>.json`: 실행별 resolved 설정
+
+`train_console.log`와 `train_metrics.jsonl`은 이어 쓰며, 각 JSONL record에는
+실행을 구분하는 `run_id`와 UTC 시간이 포함된다. JSONL에는 다음 항목이
+저장된다. `estimated_seconds_per_step`과 `estimated_eta_seconds`도 함께 저장되어
+학습 후 처리 속도를 분석할 수 있다.
 
 - `loss`, `loss_latent`, `loss_reconstruction`
 - modality별 latent/reconstruction loss
@@ -234,6 +269,13 @@ outputs/clad_stage1/stage1_latest.pt
 - shuffled DataLoader의 정확한 batch 위치
 
 다음 명령으로 재개한다.
+
+```bash
+./scripts/train_stage1.sh \
+  --resume outputs/clad_stage1/stage1_latest.pt
+```
+
+동일한 동작을 Python 명령으로 직접 실행할 수도 있다.
 
 ```bash
 python scripts/train_clad_stage1.py \
