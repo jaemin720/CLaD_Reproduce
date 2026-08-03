@@ -241,6 +241,59 @@ def test_complete_policy_samples_environment_scale_action_chunk() -> None:
     )
 
 
+def test_batched_sampling_preserves_independent_episode_random_streams() -> None:
+    torch.manual_seed(23)
+    conditioner = CLaDStage2Conditioner(backbone=_backbone())
+    config = _diffusion_config(
+        horizon=2,
+        down_dims=(16, 32),
+        num_groups=4,
+    )
+    policy = CLaDDiffusionPolicy(conditioner=conditioner, config=config).eval()
+    policy.action_normalizer.fit_from_bounds([-1.0, -1.0], [1.0, 1.0])
+    history = _stage2_batch().history
+
+    batched = policy.sample_actions(
+        history,
+        generators=(
+            torch.Generator().manual_seed(123),
+            torch.Generator().manual_seed(456),
+        ),
+    )
+    individual_samples = []
+    for index, seed in enumerate((123, 456)):
+        individual_history = CLaDHistoryBatch(
+            vision_prev={
+                name: value[index : index + 1] for name, value in history.vision_prev.items()
+            },
+            vision_now={
+                name: value[index : index + 1] for name, value in history.vision_now.items()
+            },
+            text_features=history.text_features[index : index + 1],
+            proprio_prev=history.proprio_prev[index : index + 1],
+            proprio_now=history.proprio_now[index : index + 1],
+            past_actions=history.past_actions[index : index + 1],
+        )
+        individual_samples.append(
+            policy.sample_actions(
+                individual_history,
+                generator=torch.Generator().manual_seed(seed),
+            ).normalized_actions
+        )
+
+    torch.testing.assert_close(
+        batched.normalized_actions,
+        torch.cat(individual_samples),
+        atol=2e-5,
+        rtol=2e-5,
+    )
+    with pytest.raises(ValueError, match="one entry per batch"):
+        policy.sample_actions(
+            history,
+            generators=(torch.Generator().manual_seed(123),),
+        )
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [

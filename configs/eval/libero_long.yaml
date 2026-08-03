@@ -5,6 +5,12 @@ suite_name: libero_10
 task_order_index: 0
 task_ids: []
 rollouts_per_task: 50
+
+# LIBERO's official evaluator also uses subprocess vector environments. CLaD
+# keeps one policy/DecisionNCE copy on the selected GPU and batches inference
+# across this many same-task rollouts. Start with 2 for a smoke test, then use
+# 4 (default) or benchmark 8 if host RAM and EGL/VRAM capacity permit.
+num_envs: 4
 max_steps: 600
 
 # Official LIBERO evaluation settles physics with five zero actions. CLaD's

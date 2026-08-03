@@ -9,6 +9,9 @@ Examples:
   # Full LIBERO-10 evaluation: 50 rollouts per task
   ./scripts/evaluate_libero.sh 1
 
+  # Override the default four parallel environments
+  ./scripts/evaluate_libero.sh 1 --num-envs 8
+
   # One-rollout smoke test with video
   CLAD_EVAL_OUTPUT_DIR=outputs/clad_evaluation_smoke \
     ./scripts/evaluate_libero.sh 1 \

@@ -245,6 +245,7 @@ class DDPMSchedule(nn.Module):
         sample: torch.Tensor,
         *,
         generator: torch.Generator | None = None,
+        noise: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Sample ``a_(k-1)`` from one DDPM reverse transition."""
 
@@ -287,12 +288,17 @@ class DDPMSchedule(nn.Module):
         )
         if step == 0:
             return mean
-        noise = torch.randn(
-            sample.shape,
-            device=sample.device,
-            dtype=sample.dtype,
-            generator=generator,
-        )
+        if noise is None:
+            noise = torch.randn(
+                sample.shape,
+                device=sample.device,
+                dtype=sample.dtype,
+                generator=generator,
+            )
+        elif noise.shape != sample.shape:
+            raise ValueError("noise must have the same shape as sample")
+        else:
+            noise = noise.to(device=sample.device, dtype=sample.dtype)
         variance = self._extract(
             self.posterior_variance,
             batch_timesteps,
@@ -859,21 +865,56 @@ class CLaDDiffusionPolicy(nn.Module):
         history: CLaDHistoryBatch | Mapping[str, Any],
         *,
         generator: torch.Generator | None = None,
+        generators: Sequence[torch.Generator] | None = None,
     ) -> DiffusionPolicySample:
-        """Generate one normalized six-action chunk with full DDPM sampling."""
+        """Generate normalized action chunks with full DDPM sampling.
+
+        ``generators`` gives every batch element an independent random stream.
+        This is used by vectorized rollout evaluation so an episode's diffusion
+        noise depends only on its seed, not on its position in a rollout batch.
+        """
 
         conditioning = self.conditioner(history)
         parameter = next(self.denoiser.parameters())
-        normalized_actions = torch.randn(
-            (
-                conditioning.proprio.shape[0],
-                self.config.horizon,
-                self.config.action_dim,
-            ),
-            device=parameter.device,
-            dtype=parameter.dtype,
-            generator=generator,
+        batch_size = conditioning.proprio.shape[0]
+        sample_shape = (
+            batch_size,
+            self.config.horizon,
+            self.config.action_dim,
         )
+        if generator is not None and generators is not None:
+            raise ValueError("Specify either generator or generators, not both")
+        independent_generators: tuple[torch.Generator, ...] | None = None
+        if generators is not None:
+            independent_generators = tuple(generators)
+            if len(independent_generators) != batch_size:
+                raise ValueError(
+                    f"generators must contain one entry per batch element: "
+                    f"expected {batch_size}, got {len(independent_generators)}"
+                )
+
+        def sample_noise() -> torch.Tensor:
+            if independent_generators is None:
+                return torch.randn(
+                    sample_shape,
+                    device=parameter.device,
+                    dtype=parameter.dtype,
+                    generator=generator,
+                )
+            return torch.cat(
+                [
+                    torch.randn(
+                        (1, *sample_shape[1:]),
+                        device=parameter.device,
+                        dtype=parameter.dtype,
+                        generator=episode_generator,
+                    )
+                    for episode_generator in independent_generators
+                ],
+                dim=0,
+            )
+
+        normalized_actions = sample_noise()
         for timestep in reversed(range(self.config.num_train_timesteps)):
             predicted_noise = self.denoiser(
                 normalized_actions,
@@ -886,6 +927,7 @@ class CLaDDiffusionPolicy(nn.Module):
                 timestep,
                 normalized_actions,
                 generator=generator,
+                noise=(sample_noise() if independent_generators is not None and timestep else None),
             )
         return DiffusionPolicySample(
             actions=self.action_normalizer.unnormalize(normalized_actions),

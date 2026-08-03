@@ -1,4 +1,4 @@
-"""Sequential fixed-initial-state rollout evaluation on official LIBERO."""
+"""Fixed-initial-state rollout evaluation on official LIBERO vector envs."""
 
 from __future__ import annotations
 
@@ -7,12 +7,13 @@ import os
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
 
-from clad.evaluation.online_policy import CLaDOnlinePolicy, PolicyPlan
+from clad.evaluation.online_policy import BatchedPolicyPlan, CLaDOnlinePolicy, PolicyPlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +24,7 @@ class LiberoRolloutConfig:
     task_order_index: int = 0
     task_ids: tuple[int, ...] = ()
     rollouts_per_task: int = 50
+    num_envs: int = 4
     max_steps: int = 600
     warmup_steps: int = 5
     execution_steps: int = 6
@@ -48,6 +50,7 @@ class LiberoRolloutConfig:
             raise ValueError("task_ids cannot contain duplicates")
         for name, value in {
             "rollouts_per_task": self.rollouts_per_task,
+            "num_envs": self.num_envs,
             "max_steps": self.max_steps,
             "execution_steps": self.execution_steps,
             "camera_height": self.camera_height,
@@ -103,6 +106,30 @@ class _RolloutPolicy(Protocol):
     def plan(self) -> PolicyPlan: ...
 
 
+class _VectorRolloutPolicy(Protocol):
+    execution_steps: int
+
+    def reset_batch(
+        self,
+        *,
+        slot_ids: Sequence[int],
+        task_ids: Sequence[str],
+        instructions: Sequence[str],
+        observations: Sequence[Mapping[str, Any]],
+        seeds: Sequence[int],
+    ) -> None: ...
+
+    def observe_batch(
+        self,
+        *,
+        slot_ids: Sequence[int],
+        actions: np.ndarray,
+        observations: Sequence[Mapping[str, Any]],
+    ) -> None: ...
+
+    def plan_batch(self, slot_ids: Sequence[int]) -> BatchedPolicyPlan: ...
+
+
 class _VideoSink(Protocol):
     def append(self, observation: Mapping[str, Any]) -> None: ...
 
@@ -123,8 +150,7 @@ def _libero_video_frame(observation: Mapping[str, Any], observation_key: str) ->
     frame = np.asarray(observation[observation_key], dtype=np.uint8)
     if frame.ndim != 3 or frame.shape[-1] != 3:
         raise ValueError(
-            f"LIBERO video field {observation_key!r} must have shape [H,W,3], "
-            f"got {frame.shape}"
+            f"LIBERO video field {observation_key!r} must have shape [H,W,3], got {frame.shape}"
         )
     # robosuite 1.4 exposes camera observations in OpenGL row order. Match
     # LIBERO's official VideoWriter by flipping only the display artifact;
@@ -250,6 +276,242 @@ def rollout_episode(
     )
 
 
+@dataclass(slots=True)
+class _EpisodeProgress:
+    task_id: int
+    task_name: str
+    instruction: str
+    rollout_id: int
+    init_state_id: int
+    seed: int
+    success: bool = False
+    terminated: bool = False
+    steps: int = 0
+    total_reward: float = 0.0
+    policy_calls: int = 0
+    inference_seconds: float = 0.0
+
+
+def _observation_batch(values: Any, *, expected: int) -> list[Mapping[str, Any]]:
+    if isinstance(values, Mapping):
+        observations: list[Any] = [values]
+    else:
+        observations = list(values)
+    if len(observations) != expected:
+        raise ValueError(
+            f"Vector environment returned {len(observations)} observations, expected {expected}"
+        )
+    if any(not isinstance(value, Mapping) for value in observations):
+        raise TypeError("LIBERO vector observations must contain mappings")
+    return observations
+
+
+def _vector_step(
+    environment: Any,
+    actions: np.ndarray,
+    slot_ids: Sequence[int],
+) -> tuple[list[Mapping[str, Any]], np.ndarray, np.ndarray]:
+    result = environment.step(actions, id=list(slot_ids))
+    if len(result) == 4:
+        observations, rewards, dones, _ = result
+    elif len(result) == 5:
+        observations, rewards, terminated, truncated, _ = result
+        dones = np.logical_or(terminated, truncated)
+    else:
+        raise ValueError(f"Unexpected vector environment step result length: {len(result)}")
+    count = len(slot_ids)
+    reward_values = np.asarray(rewards, dtype=np.float64).reshape(-1)
+    done_values = np.asarray(dones, dtype=bool).reshape(-1)
+    if reward_values.shape != (count,) or done_values.shape != (count,):
+        raise ValueError("Vector environment rewards and dones must match active slots")
+    return (
+        _observation_batch(observations, expected=count),
+        reward_values,
+        done_values,
+    )
+
+
+def _success_by_slot(environment: Any, slot_ids: Sequence[int]) -> dict[int, bool]:
+    successes = np.asarray(environment.check_success(), dtype=bool).reshape(-1)
+    if any(slot_id < 0 or slot_id >= len(successes) for slot_id in slot_ids):
+        raise ValueError("Vector environment check_success result does not cover active slots")
+    return {slot_id: bool(successes[slot_id]) for slot_id in slot_ids}
+
+
+def rollout_episode_batch(
+    *,
+    environment: Any,
+    policy: _VectorRolloutPolicy,
+    slot_ids: Sequence[int],
+    initial_states: Sequence[Any],
+    task_id: int,
+    task_name: str,
+    instruction: str,
+    rollout_ids: Sequence[int],
+    init_state_ids: Sequence[int],
+    seeds: Sequence[int],
+    max_steps: int,
+    warmup_steps: int,
+    action_dim: int,
+    clip_actions: bool,
+    videos: Sequence[_VideoSink] | None = None,
+) -> list[EpisodeResult]:
+    """Run one synchronous wave with independent history and RNG per env."""
+
+    slots = tuple(int(value) for value in slot_ids)
+    states = tuple(initial_states)
+    rollout_values = tuple(int(value) for value in rollout_ids)
+    init_state_values = tuple(int(value) for value in init_state_ids)
+    episode_seeds = tuple(int(value) for value in seeds)
+    batch_size = len(slots)
+    if not batch_size or len(set(slots)) != batch_size:
+        raise ValueError("slot_ids must be non-empty and unique")
+    if any(
+        len(values) != batch_size
+        for values in (states, rollout_values, init_state_values, episode_seeds)
+    ):
+        raise ValueError("All batched episode fields must match slot_ids")
+    sinks = tuple(videos) if videos is not None else tuple(_NullVideoSink() for _ in slots)
+    if len(sinks) != batch_size:
+        raise ValueError("videos must contain one sink per episode")
+    sink_by_slot = dict(zip(slots, sinks, strict=True))
+
+    vector_size = len(environment)
+    seed_batch: list[int | None] = [None] * vector_size
+    for slot_id, seed in zip(slots, episode_seeds, strict=True):
+        if not 0 <= slot_id < vector_size:
+            raise ValueError(f"slot_id {slot_id} is outside vector environment")
+        seed_batch[slot_id] = seed
+    environment.seed(seed_batch)
+    environment.reset(id=list(slots))
+    raw_observations = environment.set_init_state(
+        np.stack([np.asarray(value) for value in states]),
+        id=list(slots),
+    )
+    observations = _observation_batch(raw_observations, expected=batch_size)
+    policy.reset_batch(
+        slot_ids=slots,
+        task_ids=(task_name,) * batch_size,
+        instructions=(instruction,) * batch_size,
+        observations=observations,
+        seeds=episode_seeds,
+    )
+    for slot_id, observation in zip(slots, observations, strict=True):
+        sink_by_slot[slot_id].append(observation)
+
+    progress = {
+        slot_id: _EpisodeProgress(
+            task_id=task_id,
+            task_name=task_name,
+            instruction=instruction,
+            rollout_id=rollout_id,
+            init_state_id=init_state_id,
+            seed=seed,
+        )
+        for slot_id, rollout_id, init_state_id, seed in zip(
+            slots,
+            rollout_values,
+            init_state_values,
+            episode_seeds,
+            strict=True,
+        )
+    }
+    initial_success = _success_by_slot(environment, slots)
+    for slot_id in slots:
+        progress[slot_id].success = initial_success[slot_id]
+
+    active = [slot_id for slot_id in slots if not progress[slot_id].success]
+    for _ in range(warmup_steps):
+        if not active:
+            break
+        actions = np.zeros((len(active), action_dim), dtype=np.float32)
+        observations, rewards, dones = _vector_step(environment, actions, active)
+        policy.observe_batch(slot_ids=active, actions=actions, observations=observations)
+        success_flags = _success_by_slot(environment, active)
+        for index, (slot_id, observation) in enumerate(zip(active, observations, strict=True)):
+            episode = progress[slot_id]
+            episode.total_reward += float(rewards[index])
+            sink_by_slot[slot_id].append(observation)
+            episode.success = bool(rewards[index] > 0.0 or success_flags[slot_id])
+            episode.terminated = bool(dones[index]) and not episode.success
+        active = [
+            slot_id
+            for slot_id in active
+            if not progress[slot_id].success and not progress[slot_id].terminated
+        ]
+
+    while active:
+        plan = policy.plan_batch(active)
+        if plan.slot_ids != tuple(active):
+            raise ValueError("Batched policy plan slot order does not match active env slots")
+        if plan.actions.ndim != 3 or plan.actions.shape[:1] != (len(active),):
+            raise ValueError(
+                f"Batched policy actions must have shape [B,K,A], got {plan.actions.shape}"
+            )
+        if plan.actions.shape[1] == 0 or plan.actions.shape[2] != action_dim:
+            raise ValueError(
+                f"Batched policy actions must have non-empty K and A={action_dim}, "
+                f"got {plan.actions.shape}"
+            )
+        plan_index = {slot_id: index for index, slot_id in enumerate(active)}
+        for slot_id in active:
+            progress[slot_id].policy_calls += 1
+            progress[slot_id].inference_seconds += plan.inference_seconds
+
+        for chunk_index in range(plan.actions.shape[1]):
+            step_slots = [slot_id for slot_id in active if progress[slot_id].steps < max_steps]
+            if not step_slots:
+                active = []
+                break
+            actions = np.stack(
+                [plan.actions[plan_index[slot_id], chunk_index] for slot_id in step_slots]
+            ).astype(np.float32, copy=False)
+            if clip_actions:
+                actions = np.clip(actions, -1.0, 1.0)
+            observations, rewards, dones = _vector_step(environment, actions, step_slots)
+            policy.observe_batch(
+                slot_ids=step_slots,
+                actions=actions,
+                observations=observations,
+            )
+            success_flags = _success_by_slot(environment, step_slots)
+            for index, (slot_id, observation) in enumerate(
+                zip(step_slots, observations, strict=True)
+            ):
+                episode = progress[slot_id]
+                episode.total_reward += float(rewards[index])
+                episode.steps += 1
+                sink_by_slot[slot_id].append(observation)
+                episode.success = bool(rewards[index] > 0.0 or success_flags[slot_id])
+                episode.terminated = bool(dones[index]) and not episode.success
+            active = [
+                slot_id
+                for slot_id in active
+                if not progress[slot_id].success
+                and not progress[slot_id].terminated
+                and progress[slot_id].steps < max_steps
+            ]
+            if not active:
+                break
+
+    return [
+        EpisodeResult(
+            task_id=progress[slot_id].task_id,
+            task_name=progress[slot_id].task_name,
+            instruction=progress[slot_id].instruction,
+            rollout_id=progress[slot_id].rollout_id,
+            init_state_id=progress[slot_id].init_state_id,
+            seed=progress[slot_id].seed,
+            success=progress[slot_id].success,
+            steps=progress[slot_id].steps,
+            total_reward=progress[slot_id].total_reward,
+            policy_calls=progress[slot_id].policy_calls,
+            inference_seconds=progress[slot_id].inference_seconds,
+        )
+        for slot_id in slots
+    ]
+
+
 def _atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -354,9 +616,7 @@ class EvaluationRecorder:
             "successes": total_successes,
             "episode_weighted_success_rate": total_successes / total if total else None,
             "macro_task_success_rate": (
-                sum(task_success_rates) / len(task_success_rates)
-                if task_success_rates
-                else None
+                sum(task_success_rates) / len(task_success_rates) if task_success_rates else None
             ),
             "tasks": tasks,
         }
@@ -388,11 +648,12 @@ def evaluate_libero(
     """Evaluate selected tasks and update a resumable summary after every episode."""
 
     benchmark, environment_class = require_libero_runtime()
+    from libero.libero.envs import DummyVectorEnv, SubprocVectorEnv
+
     benchmark_types = benchmark.get_benchmark_dict()
     if config.suite_name not in benchmark_types:
         raise ValueError(
-            f"Unknown LIBERO suite {config.suite_name!r}; "
-            f"available={sorted(benchmark_types)}"
+            f"Unknown LIBERO suite {config.suite_name!r}; available={sorted(benchmark_types)}"
         )
     suite = benchmark_types[config.suite_name](config.task_order_index)
     task_ids: Sequence[int] = config.task_ids or tuple(range(suite.n_tasks))
@@ -411,58 +672,79 @@ def evaluate_libero(
         initial_states = suite.get_task_init_states(task_id)
         if len(initial_states) == 0:
             raise ValueError(f"LIBERO task {task_id} has no fixed initial states")
-        environment = environment_class(
-            bddl_file_name=suite.get_task_bddl_file_path(task_id),
-            camera_heights=config.camera_height,
-            camera_widths=config.camera_width,
-            render_gpu_device_id=config.render_gpu_device_id,
-            horizon=config.max_steps + config.warmup_steps + 1,
-        )
-        try:
-            for rollout_id in range(config.rollouts_per_task):
-                if recorder.completed(task_id, rollout_id):
-                    continue
-                init_state_id = rollout_id % len(initial_states)
-                episode_seed = config.seed + task_id * 100_000 + rollout_id
-                video: _VideoSink
-                if config.save_videos:
-                    video = _ImageioVideoSink(
-                        videos_dir / f"task{task_id:02d}_rollout{rollout_id:03d}.mp4",
-                        fps=config.video_fps,
-                        observation_key=config.video_observation_key,
+        pending_rollouts = [
+            rollout_id
+            for rollout_id in range(config.rollouts_per_task)
+            if not recorder.completed(task_id, rollout_id)
+        ]
+        if pending_rollouts:
+            environment_count = min(config.num_envs, len(pending_rollouts))
+            environment_factory = partial(
+                environment_class,
+                bddl_file_name=suite.get_task_bddl_file_path(task_id),
+                camera_heights=config.camera_height,
+                camera_widths=config.camera_width,
+                render_gpu_device_id=config.render_gpu_device_id,
+                horizon=config.max_steps + config.warmup_steps + 1,
+            )
+            vector_class = DummyVectorEnv if environment_count == 1 else SubprocVectorEnv
+            environment = vector_class([environment_factory for _ in range(environment_count)])
+            try:
+                for offset in range(0, len(pending_rollouts), environment_count):
+                    rollout_batch = pending_rollouts[offset : offset + environment_count]
+                    slot_ids = tuple(range(len(rollout_batch)))
+                    init_state_ids = tuple(
+                        rollout_id % len(initial_states) for rollout_id in rollout_batch
                     )
-                else:
-                    video = _NullVideoSink()
-                try:
-                    result = rollout_episode(
-                        environment=environment,
-                        policy=policy,
-                        initial_state=initial_states[init_state_id],
-                        task_id=task_id,
-                        task_name=task.name,
-                        instruction=task.language,
-                        rollout_id=rollout_id,
-                        init_state_id=init_state_id,
-                        seed=episode_seed,
-                        max_steps=config.max_steps,
-                        warmup_steps=config.warmup_steps,
-                        action_dim=policy.model.config.action_dim,
-                        clip_actions=config.clip_actions,
-                        video=video,
+                    episode_seeds = tuple(
+                        config.seed + task_id * 100_000 + rollout_id for rollout_id in rollout_batch
                     )
-                finally:
-                    video.close()
-                recorder.record(result)
-                status = "success" if result.success else "failure"
-                print(
-                    f"[Eval] task={task_id:02d} | rollout="
-                    f"{rollout_id + 1:02d}/{config.rollouts_per_task} | "
-                    f"{status} | steps={result.steps} | policy_calls={result.policy_calls} | "
-                    f"inference={result.inference_seconds:.2f}s",
-                    flush=True,
-                )
-        finally:
-            environment.close()
+                    videos: list[_VideoSink] = []
+                    for rollout_id in rollout_batch:
+                        if config.save_videos:
+                            videos.append(
+                                _ImageioVideoSink(
+                                    videos_dir / f"task{task_id:02d}_rollout{rollout_id:03d}.mp4",
+                                    fps=config.video_fps,
+                                    observation_key=config.video_observation_key,
+                                )
+                            )
+                        else:
+                            videos.append(_NullVideoSink())
+                    try:
+                        results = rollout_episode_batch(
+                            environment=environment,
+                            policy=policy,
+                            slot_ids=slot_ids,
+                            initial_states=[initial_states[index] for index in init_state_ids],
+                            task_id=task_id,
+                            task_name=task.name,
+                            instruction=task.language,
+                            rollout_ids=rollout_batch,
+                            init_state_ids=init_state_ids,
+                            seeds=episode_seeds,
+                            max_steps=config.max_steps,
+                            warmup_steps=config.warmup_steps,
+                            action_dim=policy.model.config.action_dim,
+                            clip_actions=config.clip_actions,
+                            videos=videos,
+                        )
+                    finally:
+                        for video in videos:
+                            video.close()
+                    for result in results:
+                        recorder.record(result)
+                        status = "success" if result.success else "failure"
+                        print(
+                            f"[Eval] task={task_id:02d} | rollout="
+                            f"{result.rollout_id + 1:02d}/{config.rollouts_per_task} | "
+                            f"{status} | steps={result.steps} | "
+                            f"policy_calls={result.policy_calls} | "
+                            f"inference={result.inference_seconds:.2f}s",
+                            flush=True,
+                        )
+            finally:
+                environment.close()
         task_summary = recorder.write_summary()["tasks"].get(str(task_id))
         if task_summary is not None:
             print(

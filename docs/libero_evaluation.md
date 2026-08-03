@@ -17,7 +17,13 @@
 - 초기 history는 최초 관측 반복과 zero action으로 왼쪽 padding한다.
 - 6-action DDPM chunk를 생성하고 configurable한 개수만큼 실행한 뒤
   다시 계획한다.
-- episode 결과를 즉시 JSONL에 append하여 중단된 평가를 재개한다.
+- 동일 task의 rollout을 subprocess LIBERO vector environment로 병렬 실행하고,
+  하나의 GPU policy/DecisionNCE 인스턴스가 observation 및 action sampling을
+  batch 처리한다.
+- 환경마다 history buffer와 diffusion generator를 분리하여 rollout seed가
+  batch 위치나 다른 environment의 종료 시점에 의존하지 않게 한다.
+- 각 vector wave가 끝나면 episode 결과를 JSONL에 append하여 중단된 평가를
+  재개한다. 중단된 wave는 같은 fixed state와 seed로 다시 실행한다.
 
 기본 설정은 [`configs/eval/libero_long.yaml`](../configs/eval/libero_long.yaml)에
 있다. 논문의 single-checkpoint 표기(`‡`)에서 직접 확인되는 값은 task당
@@ -30,6 +36,21 @@
 계획하는지는 밝히지 않는다. 이 구현은 기본적으로 6개 전체를 실행한다.
 매 control step마다 다시 계획하는 실험은 `--execution-steps 1`로 수행할 수
 있다.
+
+`num_envs=4`는 논문에 명시된 값이 아니라 평가 처리량을 위한 실행 설정이다.
+LIBERO 공식 lifelong evaluator와 같은 `SubprocVectorEnv` 계열 구조를 사용한다.
+환경 dynamics, fixed state, 성공 판정 횟수는 바꾸지 않으며 다음 항목을
+rollout별로 독립 유지한다.
+
+- episode seed와 fixed initial-state ID;
+- action/observation history;
+- diffusion initial noise 및 각 reverse-step noise stream;
+- success, termination, step count, video와 결과 record.
+
+따라서 `num_envs`는 평가 sample 수나 metric 정의를 바꾸지 않는다. 다만 GPU의
+batched floating-point kernel은 batch 1과 마지막 비트까지 같다고 보장할 수
+없으므로 resolved `num_envs`를 `run_identity.json`에 기록한다. 같은 output
+directory를 다른 `num_envs`로 재개하는 것도 거부한다.
 
 ## LIBERO runtime 준비
 
@@ -122,6 +143,11 @@ launcher는 `CUDA_VISIBLE_DEVICES=1`로 해당 GPU만 노출하고 Python 평가
 PyTorch 내부 장치 번호가 `cuda:0`으로 출력되는 것이 정상이다. 콘솔 출력은
 `outputs/clad_evaluation/eval_console.log`에도 누적된다.
 
+기본적으로 동일 task의 rollout 4개를 한 wave로 실행한다. 환경은 CPU
+subprocess/EGL context를 하나씩 소유하지만 DecisionNCE와 CLaD policy는 부모
+process의 선택된 GPU에 한 번만 적재된다. CUDA가 초기화된 process를 `fork`하지
+않도록 evaluator는 병렬 실행 시 multiprocessing `spawn`을 강제한다.
+
 다른 checkpoint나 출력 경로를 사용할 때는 다음 환경변수를 명령 앞에
 지정한다.
 
@@ -140,13 +166,15 @@ episode 결과가 섞이지 않는다.
 
 ## rollout smoke test
 
-먼저 task 0의 한 initial state에 대해 짧게 실행한다.
+먼저 task 0의 두 initial state를 두 환경에서 짧게 실행한다. 기존 평가
+directory에는 병렬 protocol identity가 없으므로 새 output directory를 쓴다.
 
 ```bash
-CLAD_EVAL_OUTPUT_DIR=outputs/clad_evaluation_smoke \
+CLAD_EVAL_OUTPUT_DIR=outputs/clad_evaluation_vector_smoke \
 ./scripts/evaluate_libero.sh 1 \
   --task-ids 0 \
-  --rollouts-per-task 1 \
+  --rollouts-per-task 2 \
+  --num-envs 2 \
   --max-steps 30 \
   --save-videos
 ```
@@ -157,7 +185,25 @@ CLAD_EVAL_OUTPUT_DIR=outputs/clad_evaluation_smoke \
 - DecisionNCE checkpoint가 학습 cache manifest와 일치하는가;
 - observation key 및 9D proprioception 오류가 없는가;
 - sampled action에 NaN/Inf가 없는가;
-- 30 step 이내 성공 여부와 관계없이 episode record가 저장되는가.
+- 서로 다른 rollout seed 두 개가 출력되는가;
+- 30 step 이내 성공 여부와 관계없이 episode record 두 개가 저장되는가.
+
+동일한 환경/정책 경로를 batch 1로 확인할 때는 별도 directory에서 다음처럼
+실행한다.
+
+```bash
+CLAD_EVAL_OUTPUT_DIR=outputs/clad_evaluation_serial_smoke \
+./scripts/evaluate_libero.sh 1 \
+  --task-ids 0 \
+  --rollouts-per-task 1 \
+  --num-envs 1 \
+  --max-steps 30
+```
+
+본 평가 전에 `--num-envs 2`, `4`, 필요하면 `8`로 같은 짧은 workload를 각각
+측정한다. GPU VRAM, host RAM, CPU 사용률과 `episodes/hour`를 기준으로 선택하며,
+환경 수 증가에 따른 선형 가속을 가정하지 않는다. 한 GPU에 evaluator process를
+여러 개 띄우면 모델 weight가 중복되므로 사용하지 않는다.
 
 ## 50-rollout 본 평가
 
@@ -167,6 +213,9 @@ CLAD_EVAL_OUTPUT_DIR=outputs/clad_evaluation_smoke \
 ```bash
 ./scripts/evaluate_libero.sh 1
 ```
+
+기본값은 `--num-envs 4`다. 충분한 자원에서 처리량이 실제로 개선되는 것을
+확인한 뒤 `./scripts/evaluate_libero.sh 1 --num-envs 8`처럼 override할 수 있다.
 
 같은 명령을 다시 실행하면 이미 완료된 `(task_id, rollout_id)`는 건너뛴다.
 평가 정체성과 다른 checkpoint/config를 같은 output directory에 섞으려 하면

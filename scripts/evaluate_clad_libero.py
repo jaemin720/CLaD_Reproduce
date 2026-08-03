@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
@@ -66,6 +67,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--task-ids", type=int, nargs="+")
     parser.add_argument("--rollouts-per-task", type=int)
+    parser.add_argument("--num-envs", type=int)
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--warmup-steps", type=int)
     parser.add_argument("--execution-steps", type=int)
@@ -105,6 +107,7 @@ def _rollout_config(args: argparse.Namespace) -> LiberoRolloutConfig:
     overrides = {
         "task_ids": args.task_ids,
         "rollouts_per_task": args.rollouts_per_task,
+        "num_envs": args.num_envs,
         "max_steps": args.max_steps,
         "warmup_steps": args.warmup_steps,
         "execution_steps": args.execution_steps,
@@ -157,6 +160,15 @@ def _checkpoint_summary(loaded: Any) -> dict[str, Any]:
 def main() -> None:
     args = parse_args()
     config = _rollout_config(args)
+    if not args.checkpoint_only and config.num_envs > 1:
+        start_method = multiprocessing.get_start_method(allow_none=True)
+        if start_method is None:
+            multiprocessing.set_start_method("spawn")
+        elif start_method != "spawn":
+            raise RuntimeError(
+                "Parallel LIBERO evaluation requires multiprocessing start method "
+                f"'spawn', but {start_method!r} is already active"
+            )
     device = _resolve_device(args.device)
     if not args.checkpoint_only:
         # Fail quickly before constructing a 0.66B-parameter model.
@@ -211,9 +223,7 @@ def main() -> None:
                 if name not in {"rollouts_per_task", "task_ids", "save_videos", "resume"}
             },
             "camera_observation_keys": (
-                camera_mapping
-                if camera_mapping is not None
-                else encoder.camera_observation_keys
+                camera_mapping if camera_mapping is not None else encoder.camera_observation_keys
             ),
         }
         recorder = EvaluationRecorder(
@@ -225,7 +235,7 @@ def main() -> None:
         print(
             f"  suite={config.suite_name} | tasks="
             f"{list(config.task_ids) if config.task_ids else 'all'} | "
-            f"rollouts_per_task={config.rollouts_per_task}",
+            f"rollouts_per_task={config.rollouts_per_task} | num_envs={config.num_envs}",
             flush=True,
         )
         print(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -44,8 +44,7 @@ def libero_proprioception(observation: Mapping[str, Any]) -> np.ndarray:
     actual_sizes = tuple(component.size for component in components)
     if actual_sizes != expected_sizes:
         raise ValueError(
-            "LIBERO proprioception components must have sizes (2, 3, 4), "
-            f"got {actual_sizes}"
+            f"LIBERO proprioception components must have sizes (2, 3, 4), got {actual_sizes}"
         )
     proprioception = np.concatenate(components)
     if not np.isfinite(proprioception).all():
@@ -109,9 +108,7 @@ class OnlineDecisionNCEEncoder:
         if verify_checkpoint:
             if not checkpoint_path.is_file():
                 cache.close()
-                raise FileNotFoundError(
-                    f"DecisionNCE checkpoint does not exist: {checkpoint_path}"
-                )
+                raise FileNotFoundError(f"DecisionNCE checkpoint does not exist: {checkpoint_path}")
             actual_sha256 = sha256_file(checkpoint_path)
             if actual_sha256 != expected_sha256:
                 cache.close()
@@ -167,29 +164,44 @@ class OnlineDecisionNCEEncoder:
 
     @torch.inference_mode()
     def encode_observation(self, observation: Mapping[str, Any]) -> EncodedObservation:
+        return self.encode_observations((observation,))[0]
+
+    @torch.inference_mode()
+    def encode_observations(
+        self,
+        observations: Sequence[Mapping[str, Any]],
+    ) -> list[EncodedObservation]:
+        """Encode a rollout batch in one DecisionNCE call per camera view."""
+
+        observation_batch = tuple(observations)
+        if not observation_batch:
+            raise ValueError("observations cannot be empty")
         images: dict[str, torch.Tensor] = {}
         for view_name, observation_key in self.camera_observation_keys.items():
-            if observation_key not in observation:
-                raise KeyError(
-                    f"LIBERO observation is missing camera field {observation_key!r}"
-                )
-            image = np.asarray(observation[observation_key])
-            if image.ndim != 3 or image.shape[-1] != 3:
-                raise ValueError(
-                    f"Camera {observation_key!r} must have shape [H,W,3], got {image.shape}"
-                )
-            images[view_name] = torch.from_numpy(
-                np.ascontiguousarray(image, dtype=np.uint8)
-            ).unsqueeze(0)
-        encoded = {
-            name: feature.squeeze(0)
-            for name, feature in self.adapter.encode_views(images).items()
-        }
-        proprioception = torch.from_numpy(libero_proprioception(observation)).to(self.device)
-        return EncodedObservation(
-            vision_features=encoded,
-            proprioception=proprioception,
-        )
+            view_images: list[torch.Tensor] = []
+            for observation in observation_batch:
+                if observation_key not in observation:
+                    raise KeyError(
+                        f"LIBERO observation is missing camera field {observation_key!r}"
+                    )
+                image = np.asarray(observation[observation_key])
+                if image.ndim != 3 or image.shape[-1] != 3:
+                    raise ValueError(
+                        f"Camera {observation_key!r} must have shape [H,W,3], got {image.shape}"
+                    )
+                view_images.append(torch.from_numpy(np.ascontiguousarray(image, dtype=np.uint8)))
+            images[view_name] = torch.stack(view_images)
+        encoded_views = self.adapter.encode_views(images)
+        proprioception = torch.from_numpy(
+            np.stack([libero_proprioception(value) for value in observation_batch])
+        ).to(self.device)
+        return [
+            EncodedObservation(
+                vision_features={name: features[index] for name, features in encoded_views.items()},
+                proprioception=proprioception[index],
+            )
+            for index in range(len(observation_batch))
+        ]
 
     def close(self) -> None:
         self.feature_cache.close()
@@ -236,10 +248,7 @@ class OnlineHistoryBuffer:
         self._observations.append(observation)
 
     def history(self, text_feature: torch.Tensor) -> CLaDHistoryBatch:
-        if (
-            len(self._observations) != self.horizon + 1
-            or len(self._actions) != self.horizon
-        ):
+        if len(self._observations) != self.horizon + 1 or len(self._actions) != self.horizon:
             raise RuntimeError("History buffer must be reset before history()")
         previous = self._observations[0]
         current = self._observations[-1]
@@ -248,12 +257,10 @@ class OnlineHistoryBuffer:
             raise ValueError(f"text_feature must have shape [D] or [1,D], got {text.shape}")
         return CLaDHistoryBatch(
             vision_prev={
-                name: value.unsqueeze(0)
-                for name, value in previous.vision_features.items()
+                name: value.unsqueeze(0) for name, value in previous.vision_features.items()
             },
             vision_now={
-                name: value.unsqueeze(0)
-                for name, value in current.vision_features.items()
+                name: value.unsqueeze(0) for name, value in current.vision_features.items()
             },
             text_features=text,
             proprio_prev=previous.proprioception.unsqueeze(0),
@@ -270,6 +277,22 @@ class PolicyPlan:
     inference_seconds: float
 
 
+@dataclass(frozen=True, slots=True)
+class BatchedPolicyPlan:
+    """Action chunks for a synchronous vector of active environments."""
+
+    slot_ids: tuple[int, ...]
+    actions: np.ndarray
+    inference_seconds: float
+
+
+@dataclass(slots=True)
+class _OnlineEpisodeState:
+    history: OnlineHistoryBuffer
+    text_feature: torch.Tensor
+    generator: torch.Generator
+
+
 class CLaDOnlinePolicy:
     """Stateful receding-horizon wrapper around the EMA diffusion policy."""
 
@@ -284,8 +307,7 @@ class CLaDOnlinePolicy:
     ) -> None:
         if not 1 <= execution_steps <= model.config.horizon:
             raise ValueError(
-                f"execution_steps must be in [1, {model.config.horizon}], "
-                f"got {execution_steps}"
+                f"execution_steps must be in [1, {model.config.horizon}], got {execution_steps}"
             )
         parameter = next(model.denoiser.parameters())
         self.model = model
@@ -298,12 +320,7 @@ class CLaDOnlinePolicy:
         self.execution_steps = execution_steps
         self.amp_enabled = amp_enabled and self.device.type == "cuda"
         self.amp_dtype = amp_dtype
-        self.history_buffer = OnlineHistoryBuffer(
-            horizon=model.config.horizon,
-            action_dim=model.config.action_dim,
-        )
-        self._text_feature: torch.Tensor | None = None
-        self._generator = torch.Generator(device=self.device)
+        self._states: dict[int, _OnlineEpisodeState] = {}
 
     def reset(
         self,
@@ -313,29 +330,167 @@ class CLaDOnlinePolicy:
         observation: Mapping[str, Any],
         seed: int,
     ) -> None:
-        self._generator.manual_seed(seed)
-        self._text_feature = self.encoder.text_feature(task_id, instruction)
-        self.history_buffer.reset(self.encoder.encode_observation(observation))
+        self.reset_batch(
+            slot_ids=(0,),
+            task_ids=(task_id,),
+            instructions=(instruction,),
+            observations=(observation,),
+            seeds=(seed,),
+        )
+
+    def reset_batch(
+        self,
+        *,
+        slot_ids: Sequence[int],
+        task_ids: Sequence[str],
+        instructions: Sequence[str],
+        observations: Sequence[Mapping[str, Any]],
+        seeds: Sequence[int],
+    ) -> None:
+        """Replace policy state with one independently seeded state per env slot."""
+
+        slots = tuple(int(value) for value in slot_ids)
+        tasks = tuple(task_ids)
+        language = tuple(instructions)
+        observation_batch = tuple(observations)
+        episode_seeds = tuple(int(value) for value in seeds)
+        sizes = {
+            len(slots),
+            len(tasks),
+            len(language),
+            len(observation_batch),
+            len(episode_seeds),
+        }
+        if sizes != {len(slots)} or not slots:
+            raise ValueError("Batched policy reset fields must have the same positive length")
+        if len(set(slots)) != len(slots):
+            raise ValueError("slot_ids cannot contain duplicates")
+        encoded = self.encoder.encode_observations(observation_batch)
+        states: dict[int, _OnlineEpisodeState] = {}
+        text_cache: dict[tuple[str, str], torch.Tensor] = {}
+        for slot_id, task_id, instruction, initial, seed in zip(
+            slots,
+            tasks,
+            language,
+            encoded,
+            episode_seeds,
+            strict=True,
+        ):
+            key = (task_id, instruction)
+            if key not in text_cache:
+                text_cache[key] = self.encoder.text_feature(task_id, instruction)
+            text_feature = text_cache[key]
+            history = OnlineHistoryBuffer(
+                horizon=self.model.config.horizon,
+                action_dim=self.model.config.action_dim,
+            )
+            history.reset(initial)
+            generator = torch.Generator(device=self.device)
+            generator.manual_seed(seed)
+            states[slot_id] = _OnlineEpisodeState(
+                history=history,
+                text_feature=text_feature,
+                generator=generator,
+            )
+        self._states = states
 
     def observe(self, action: np.ndarray, observation: Mapping[str, Any]) -> None:
-        self.history_buffer.append(action, self.encoder.encode_observation(observation))
+        self.observe_batch(
+            slot_ids=(0,),
+            actions=np.asarray(action, dtype=np.float32).reshape(1, -1),
+            observations=(observation,),
+        )
+
+    def observe_batch(
+        self,
+        *,
+        slot_ids: Sequence[int],
+        actions: np.ndarray,
+        observations: Sequence[Mapping[str, Any]],
+    ) -> None:
+        slots = tuple(int(value) for value in slot_ids)
+        observation_batch = tuple(observations)
+        action_batch = np.asarray(actions, dtype=np.float32)
+        expected = (len(slots), self.model.config.action_dim)
+        if action_batch.shape != expected:
+            raise ValueError(f"actions must have shape {expected}, got {action_batch.shape}")
+        if len(observation_batch) != len(slots):
+            raise ValueError("observations and slot_ids must have the same length")
+        missing = [slot_id for slot_id in slots if slot_id not in self._states]
+        if missing:
+            raise KeyError(f"Online policy has no state for slots {missing}")
+        encoded = self.encoder.encode_observations(observation_batch)
+        for slot_id, action, observation in zip(slots, action_batch, encoded, strict=True):
+            self._states[slot_id].history.append(action, observation)
 
     @torch.inference_mode()
     def plan(self) -> PolicyPlan:
-        if self._text_feature is None:
-            raise RuntimeError("Online policy must be reset before plan()")
-        history = self.history_buffer.history(self._text_feature)
+        batch = self.plan_batch((0,))
+        return PolicyPlan(
+            actions=batch.actions[0],
+            inference_seconds=batch.inference_seconds,
+        )
+
+    @staticmethod
+    def _stack_histories(histories: Sequence[CLaDHistoryBatch]) -> CLaDHistoryBatch:
+        batches = tuple(histories)
+        if not batches:
+            raise ValueError("histories cannot be empty")
+        views = tuple(batches[0].vision_prev)
+        expected_views = set(views)
+        if any(
+            set(batch.vision_prev) != expected_views or set(batch.vision_now) != expected_views
+            for batch in batches
+        ):
+            raise ValueError("All batched histories must contain the same camera views")
+        return CLaDHistoryBatch(
+            vision_prev={
+                name: torch.cat([batch.vision_prev[name] for batch in batches], dim=0)
+                for name in views
+            },
+            vision_now={
+                name: torch.cat([batch.vision_now[name] for batch in batches], dim=0)
+                for name in views
+            },
+            text_features=torch.cat([batch.text_features for batch in batches], dim=0),
+            proprio_prev=torch.cat([batch.proprio_prev for batch in batches], dim=0),
+            proprio_now=torch.cat([batch.proprio_now for batch in batches], dim=0),
+            past_actions=torch.cat([batch.past_actions for batch in batches], dim=0),
+        )
+
+    @torch.inference_mode()
+    def plan_batch(self, slot_ids: Sequence[int]) -> BatchedPolicyPlan:
+        slots = tuple(int(value) for value in slot_ids)
+        if not slots:
+            raise ValueError("slot_ids cannot be empty")
+        missing = [slot_id for slot_id in slots if slot_id not in self._states]
+        if missing:
+            raise RuntimeError(f"Online policy must be reset for slots {missing}")
+        states = [self._states[slot_id] for slot_id in slots]
+        history = self._stack_histories(
+            [state.history.history(state.text_feature) for state in states]
+        )
         started = time.perf_counter()
         with torch.autocast(
             device_type=self.device.type,
             dtype=self.amp_dtype,
             enabled=self.amp_enabled,
         ):
-            sample = self.model.sample_actions(history, generator=self._generator)
+            if len(states) == 1:
+                sample = self.model.sample_actions(history, generator=states[0].generator)
+            else:
+                sample = self.model.sample_actions(
+                    history,
+                    generators=[state.generator for state in states],
+                )
         if self.device.type == "cuda":
             torch.cuda.synchronize(self.device)
         elapsed = time.perf_counter() - started
-        actions = sample.actions[0, : self.execution_steps].float().cpu().numpy()
+        actions = sample.actions[:, : self.execution_steps].float().cpu().numpy()
         if not np.isfinite(actions).all():
             raise FloatingPointError("Sampled policy actions contain NaN or Inf")
-        return PolicyPlan(actions=actions, inference_seconds=elapsed)
+        return BatchedPolicyPlan(
+            slot_ids=slots,
+            actions=actions,
+            inference_seconds=elapsed,
+        )

@@ -357,10 +357,23 @@ Stage 2 checkpoint는 이 artifact를 내장하지 않고 size와 SHA-256으로 
 - reward가 양수이거나 environment `check_success()`가 참이면 성공으로 종료한다.
 - paper는 최대 step, clipping, 성공 API를 구체적으로 제시하지 않는다.
 
-### E06. latency의 범위
+### E06. 병렬 평가
 
-현재 `inference_seconds`는 history tensor가 준비된 뒤 diffusion policy의
-100-step sampling과 CUDA synchronization에 걸린 시간이다. 다음은 제외한다.
+- **논문 미명시**: rollout environment 수와 evaluation process 구조가 없다.
+- **현재 기본값**: 같은 task의 rollout을 `num_envs=4`인 synchronous
+  `SubprocVectorEnv` wave로 실행한다. 하나의 부모 process만 GPU의 DecisionNCE와
+  CLaD policy를 소유하고 observation/action inference를 batch 처리한다.
+- environment seed, initial-state ID, history와 diffusion generator는 episode별로
+  독립이다. 종료한 slot은 다음 vector step과 policy batch에서 제거한다.
+- `num_envs`는 metric 정의가 아니라 실행 protocol이지만 batched GPU 연산의
+  부동소수점 차이를 추적할 수 있도록 run identity에 포함한다.
+- `num_envs=1`은 `DummyVectorEnv`를 사용하는 reference/debug 경로다.
+
+### E07. latency의 범위
+
+현재 `inference_seconds`는 history tensor가 준비된 뒤 batch 전체의 diffusion
+policy 100-step sampling과 CUDA synchronization에 걸린 wall time이다. 같은
+batch의 active episode에는 동일한 planning latency를 기록한다. 다음은 제외한다.
 
 - live DecisionNCE image encoding;
 - LIBERO environment step과 rendering;
@@ -370,7 +383,7 @@ Stage 2 checkpoint는 이 artifact를 내장하지 않고 size와 SHA-256으로 
 없다. 공정한 latency 비교가 필요하면 VLM encoding을 포함한 별도 wall-clock
 측정이 필요하다.
 
-### E07. 집계와 resume
+### E08. 집계와 resume
 
 - task별 success rate의 단순 평균을 `macro_task_success_rate`로 기록한다.
 - 동시에 전체 episode 기준 weighted rate도 기록한다.

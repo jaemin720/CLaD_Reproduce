@@ -157,6 +157,8 @@ and rejects different frozen weights.
 - [x] configurable receding-horizon action-chunk execution;
 - [x] official LIBERO fixed initial states and five-step physics warmup;
 - [x] paper-reported 50-rollout single-checkpoint protocol;
+- [x] same-task subprocess vector environments with batched DecisionNCE/policy inference;
+- [x] per-episode history and diffusion RNG streams independent of vector batch order;
 - [x] resumable per-episode JSONL, task-level success metrics, and videos;
 - [ ] top-3 checkpoint retention/selection automation;
 - [ ] modality, reconstruction, and attention ablations.

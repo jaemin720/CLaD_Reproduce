@@ -212,9 +212,13 @@ The paper-scale run starts with `./scripts/train_stage2.sh`.
 Stage 2 EMA restoration, online six-step history construction, fixed-state
 LIBERO rollout, resumable metrics, and evaluation commands are documented in
 [`docs/libero_evaluation.md`](docs/libero_evaluation.md). The default is the
-paper's single-checkpoint protocol of 50 rollouts per task. The minimal
-LIBERO/MuJoCo runtime pins and non-interactive path configuration are documented
-there; these packages are not imported by training or ordinary unit tests.
+paper's single-checkpoint protocol of 50 rollouts per task. Four same-task
+LIBERO environments run in subprocesses by default while one DecisionNCE/CLaD
+model on the selected GPU performs batched inference. Per-episode history,
+fixed initial state, seed, and diffusion random stream remain independent;
+`--num-envs 1` retains the reference serial path. The minimal LIBERO/MuJoCo
+runtime pins and non-interactive path configuration are documented there;
+these packages are not imported by training or ordinary unit tests.
 
 After choosing a free physical GPU, launch the full evaluation with:
 

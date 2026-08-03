@@ -11,6 +11,7 @@ from clad.evaluation.libero_rollout import (
     LiberoRolloutConfig,
     evaluate_libero,
     rollout_episode,
+    rollout_episode_batch,
 )
 from clad.evaluation.libero_setup import (
     activate_libero_config,
@@ -18,6 +19,7 @@ from clad.evaluation.libero_setup import (
     configure_robosuite_logging,
 )
 from clad.evaluation.online_policy import (
+    BatchedPolicyPlan,
     CLaDOnlinePolicy,
     EncodedObservation,
     OnlineDecisionNCEEncoder,
@@ -27,6 +29,7 @@ from clad.evaluation.online_policy import (
 )
 
 __all__ = [
+    "BatchedPolicyPlan",
     "CLaDOnlinePolicy",
     "EncodedObservation",
     "EpisodeResult",
@@ -44,4 +47,5 @@ __all__ = [
     "libero_proprioception",
     "load_stage2_policy",
     "rollout_episode",
+    "rollout_episode_batch",
 ]

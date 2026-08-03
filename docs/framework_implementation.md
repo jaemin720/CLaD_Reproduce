@@ -499,18 +499,24 @@ history → frozen CLaD → g_p/g_s
 ### 8.5 LIBERO episode
 
 [`libero_rollout.py`](../src/clad/evaluation/libero_rollout.py)는 official benchmark
-registry에서 task, BDDL, fixed initial state를 읽고 offscreen environment를 만든다.
+registry에서 task, BDDL, fixed initial state를 읽는다. 동일 task의 pending
+rollout을 기본 4개씩 묶고, 한 개면 `DummyVectorEnv`, 여러 개면 공식
+`SubprocVectorEnv`로 offscreen environment를 만든다.
 
-1. seed, reset, fixed initial state 설정;
-2. policy/history reset;
-3. zero action 5회로 physics warmup;
-4. action chunk plan 및 순차 실행;
-5. reward 또는 `check_success()`로 성공 확인;
-6. 성공, termination 또는 policy action 600 steps에서 종료;
-7. episode result를 즉시 append/fsync하고 summary 갱신.
+1. 각 slot의 seed, reset, fixed initial state 설정;
+2. live RGB를 batch DecisionNCE encode하고 slot별 policy/history/generator reset;
+3. active slot에 zero action 5회로 physics warmup;
+4. active history를 batch로 묶어 한 번의 DDPM sampling으로 action chunk 생성;
+5. chunk action을 vector step하고 종료 slot을 active set에서 제거;
+6. reward 또는 `check_success()`로 slot별 성공 확인;
+7. 성공, termination 또는 policy action 600 steps에서 episode별 종료;
+8. wave 결과를 episode 단위로 append/fsync하고 summary 갱신.
 
 task당 rollout `i`는 fixed state `i % num_initial_states`를 쓴다. 중간 중단 후
 같은 command를 실행하면 기록된 `(task_id, rollout_id)`를 건너뛴다.
+각 slot의 DDPM generator는 해당 episode seed만 사용하므로 batch 위치와 다른
+slot의 조기 종료에 의해 random stream이 바뀌지 않는다. 정책 weight는 부모 GPU
+process에 한 번만 존재하고 environment subprocess에는 복제하지 않는다.
 
 ### 8.6 Evaluation outputs
 
