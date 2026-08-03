@@ -2,10 +2,10 @@
 
 ## Position in the implementation plan
 
-The Stage 2 model and trainer are implemented. The remaining prerequisite for
-the paper-scale 200K-step run is a one-step GPU smoke test with the full U-Net
-widths. After training, implementation moves to online LIBERO rollout and
-evaluation.
+The Stage 2 model, trainer, full-width GPU smoke test, EMA checkpoint loader,
+and online LIBERO evaluator are implemented. This document remains the launch
+and resume guide for the paper-scale 200K-step run; completed checkpoints can
+be evaluated with [`libero_evaluation.md`](libero_evaluation.md).
 
 ## Prerequisites
 

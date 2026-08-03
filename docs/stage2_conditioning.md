@@ -14,7 +14,9 @@ remain frozen. The implemented bridge covers equations (20)--(21):
 4. concatenate `g_p` and `g_s` for the action denoiser.
 
 The conditional denoiser, diffusion schedule, DDPM loss, and reverse sampler
-are now implemented. The Stage 2 trainer is the next implementation step.
+are implemented, as are the Stage 2 trainer, EMA checkpoint restoration, and
+LIBERO rollout evaluator. See [`stage2_training.md`](stage2_training.md) and
+[`libero_evaluation.md`](libero_evaluation.md) for the downstream workflow.
 
 ## Reproduction assumptions
 

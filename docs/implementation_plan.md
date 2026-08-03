@@ -131,8 +131,8 @@ The external action horizon remains six. Internally, the temporal axis is
 right-padded from six to eight so two stride-2 U-Net levels are shape-safe,
 then cropped back to six. As in Diffusion Policy, actions are normalized per
 dimension to `[-1, 1]`; normalization statistics must be fitted from the
-training split and are persistent policy buffers. The next trainer step will
-compute those statistics and store them in every Stage 2 checkpoint.
+training split and are persistent policy buffers. The Stage 2 trainer computes
+those statistics before optimization and stores them in every checkpoint.
 
 `Stage2Trainer` uses successful optimizer updates for the paper's 200K-step
 budget, with AMP overflow attempts tracked separately. Its resumable sampler,
@@ -155,7 +155,8 @@ and rejects different frozen weights.
 - [x] frozen foresight and DecisionNCE cache/checkpoint identity checks;
 - [x] online DecisionNCE encoding and padded six-step history buffer;
 - [x] configurable receding-horizon action-chunk execution;
-- [x] official fixed initial states and 50-rollout single-checkpoint protocol;
+- [x] official LIBERO fixed initial states and five-step physics warmup;
+- [x] paper-reported 50-rollout single-checkpoint protocol;
 - [x] resumable per-episode JSONL, task-level success metrics, and videos;
 - [ ] top-3 checkpoint retention/selection automation;
 - [ ] modality, reconstruction, and attention ablations.

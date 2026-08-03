@@ -1,5 +1,6 @@
-# Single-checkpoint protocol from the CLaD paper: 50 fixed-state rollouts
-# per task on LIBERO-LONG. Set task_ids to a subset for smoke tests.
+# The CLaD paper reports 50 rollouts for its single-checkpoint protocol.
+# Fixed initial states come from the standard LIBERO benchmark API; the paper
+# does not specify their order, seeds, image size, or episode horizon.
 suite_name: libero_10
 task_order_index: 0
 task_ids: []

@@ -20,9 +20,11 @@
 - episode 결과를 즉시 JSONL에 append하여 중단된 평가를 재개한다.
 
 기본 설정은 [`configs/eval/libero_long.yaml`](../configs/eval/libero_long.yaml)에
-있다. 논문의 single-checkpoint 표기(`‡`)에 맞춰 task당 50 rollout,
-최대 600 policy step, 128x128 agent view를 사용한다. 공식 LIBERO 평가처럼
-initial state 설정 후 5회의 zero action으로 physics를 안정화한다.
+있다. 논문의 single-checkpoint 표기(`‡`)에서 직접 확인되는 값은 task당
+50 rollout이다. 최대 600 policy step과 128x128 agent view는 논문에 적혀 있지
+않은 이 재현의 기본값이다. fixed initial state와 초기 5회의 zero action은
+공식 LIBERO benchmark API 및 평가 관행을 따른다. initial-state 순서와 seed도
+논문이 공개한 설정은 아니다.
 
 논문은 6개 action을 생성한다고 설명하지만 몇 개를 실행한 뒤 다시
 계획하는지는 밝히지 않는다. 이 구현은 기본적으로 6개 전체를 실행한다.

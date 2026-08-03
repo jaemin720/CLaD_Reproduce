@@ -16,8 +16,9 @@ loss:                      MSE(predicted noise, epsilon)
 ```
 
 The optimizer, trainable-policy EMA, checkpointing, logging, and 200K-step
-Stage 2 trainer are implemented. The next step is a full-architecture GPU
-smoke test before launching the paper-scale run.
+Stage 2 trainer are implemented. The full-width GPU smoke test has also been
+completed; the remaining experimental work is completion/evaluation of chosen
+training checkpoints and the paper's optional ablations.
 
 ## Architecture assumptions
 

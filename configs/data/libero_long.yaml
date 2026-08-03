@@ -8,6 +8,10 @@ file_pattern: "*_demo.hdf5"
 # changing the dataset interface.
 camera_keys:
   - obs/agentview_rgb
+
+# Reproduction default from the official LIBERO HDF5 schema. This 9D vector is
+# not the joint-angle-and-velocity contract described generically in the paper;
+# the exact author-side proprioception fields are not reported.
 proprio_key: robot_states
 action_key: actions
 

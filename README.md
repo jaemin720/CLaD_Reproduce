@@ -34,6 +34,9 @@ paper:
 - [`docs/reproduction_assumptions.md`](docs/reproduction_assumptions.md)
   separates paper-reported details from underspecified choices made by this
   reproduction and ranks the choices most likely to affect results.
+- [`docs/paper_alignment_audit.md`](docs/paper_alignment_audit.md) records the
+  equation-by-equation audit against arXiv v1, confirmed matches, unresolved
+  divergences, and corrections made during the audit.
 - [`docs/implementation_plan.md`](docs/implementation_plan.md) tracks completed
   components and remaining evaluation/ablation work.
 

@@ -70,6 +70,11 @@ step으로 센다. 논문의 시간과 GPU 수치는 저자 환경의 보고값�
 - **현재 선택**: demonstration의 `robot_states` 9차원 vector를 사용한다.
   online rollout에서는 `gripper qpos(2) + EEF position(3) + EEF
   quaternion(4)`을 연결해 같은 9차원을 복원한다.
+- **정합성 상태**: **미해결 차이**다. 현재 9차원 값에는 논문 문장의 full arm
+  joint velocity가 포함되지 않으므로 그 서술과 문자 그대로 같지 않다. 다만
+  논문은 `Dp`, 정확한 field, 좌표계와 전처리를 공개하지 않았고 현재 HDF5의
+  `robot_states` contract는 online에서 정확히 재구성 가능하므로, 추측으로
+  입력 schema와 이미 학습된 checkpoint를 바꾸지 않는다.
 - **중요성**: 현재 state는 full arm joint angle/velocity vector가 아니다.
   저자 구현이 다른 proprio schema를 사용했다면 직접적인 재현 차이다.
 
