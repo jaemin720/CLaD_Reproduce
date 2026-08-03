@@ -26,6 +26,17 @@ paper:
 - [x] Stage 2 trainer and checkpointing
 - [x] EMA policy loading and LIBERO-LONG rollout evaluation
 
+## Architecture documentation
+
+- [`docs/framework_implementation.md`](docs/framework_implementation.md) traces
+  the complete data, model, checkpoint, and online-rollout implementation with
+  tensor contracts and source-file ownership.
+- [`docs/reproduction_assumptions.md`](docs/reproduction_assumptions.md)
+  separates paper-reported details from underspecified choices made by this
+  reproduction and ranks the choices most likely to affect results.
+- [`docs/implementation_plan.md`](docs/implementation_plan.md) tracks completed
+  components and remaining evaluation/ablation work.
+
 ## Local data layout
 
 The dataset is not copied into this repository. Set its local absolute path
@@ -200,6 +211,17 @@ LIBERO rollout, resumable metrics, and evaluation commands are documented in
 paper's single-checkpoint protocol of 50 rollouts per task. The minimal
 LIBERO/MuJoCo runtime pins and non-interactive path configuration are documented
 there; these packages are not imported by training or ordinary unit tests.
+
+After choosing a free physical GPU, launch the full evaluation with:
+
+```bash
+./scripts/evaluate_libero.sh 1
+```
+
+The GPU number is mapped through `CUDA_VISIBLE_DEVICES`, so the evaluation
+process consistently uses `cuda:0` internally. Additional rollout overrides
+can be appended to the command; see the evaluation guide for a smoke-test
+example.
 
 ## Licensing
 

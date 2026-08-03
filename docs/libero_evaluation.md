@@ -105,21 +105,48 @@ python scripts/evaluate_clad_libero.py \
 기본값은 EMA weight이다. 비교 목적으로 online training weight를 확인할
 때만 `--weights raw`를 사용한다.
 
+## 평가 shell launcher
+
+반복 실행에는 `scripts/evaluate_libero.sh`를 사용한다. 첫 번째 인자는 host에서
+보이는 물리 GPU 번호이며 필수다. 예를 들어 GPU 1에서 기본 논문 프로토콜
+(10 tasks × 50 rollouts)을 실행하려면 다음과 같이 입력한다.
+
+```bash
+./scripts/evaluate_libero.sh 1
+```
+
+launcher는 `CUDA_VISIBLE_DEVICES=1`로 해당 GPU만 노출하고 Python 평가
+프로세스에는 `--device cuda:0`을 전달한다. 따라서 첫 번째 인자가 1이어도
+PyTorch 내부 장치 번호가 `cuda:0`으로 출력되는 것이 정상이다. 콘솔 출력은
+`outputs/clad_evaluation/eval_console.log`에도 누적된다.
+
+다른 checkpoint나 출력 경로를 사용할 때는 다음 환경변수를 명령 앞에
+지정한다.
+
+```text
+CLAD_STAGE2_CHECKPOINT
+CLAD_FORESIGHT_CHECKPOINT
+CLAD_DECISIONNCE_CACHE_DIR
+CLAD_LIBERO_CONFIG_DIR
+CLAD_EVAL_OUTPUT_DIR
+CLAD_PYTHON
+```
+
+서로 다른 checkpoint는 반드시 서로 다른 `CLAD_EVAL_OUTPUT_DIR`를 사용해야
+한다. evaluator가 결과 디렉터리의 checkpoint hash를 검증하므로 다른 모델의
+episode 결과가 섞이지 않는다.
+
 ## rollout smoke test
 
 먼저 task 0의 한 initial state에 대해 짧게 실행한다.
 
 ```bash
-MUJOCO_GL=egl MUJOCO_EGL_DEVICE_ID=0 \
-python scripts/evaluate_clad_libero.py \
-  --checkpoint outputs/clad_stage2/stage2_latest.pt \
-  --foresight-checkpoint outputs/clad_stage1/stage1_foresight.pt \
-  --cache-dir .cache/decisionnce/libero_long \
-  --output-dir outputs/clad_evaluation_smoke \
-  --device cuda \
+CLAD_EVAL_OUTPUT_DIR=outputs/clad_evaluation_smoke \
+./scripts/evaluate_libero.sh 1 \
   --task-ids 0 \
   --rollouts-per-task 1 \
-  --max-steps 30
+  --max-steps 30 \
+  --save-videos
 ```
 
 확인할 항목은 다음과 같다.
@@ -136,13 +163,7 @@ python scripts/evaluate_clad_libero.py \
 실행한다.
 
 ```bash
-MUJOCO_GL=egl MUJOCO_EGL_DEVICE_ID=0 \
-python scripts/evaluate_clad_libero.py \
-  --checkpoint outputs/clad_stage2/stage2_latest.pt \
-  --foresight-checkpoint outputs/clad_stage1/stage1_foresight.pt \
-  --cache-dir .cache/decisionnce/libero_long \
-  --output-dir outputs/clad_evaluation \
-  --device cuda
+./scripts/evaluate_libero.sh 1
 ```
 
 같은 명령을 다시 실행하면 이미 완료된 `(task_id, rollout_id)`는 건너뛴다.

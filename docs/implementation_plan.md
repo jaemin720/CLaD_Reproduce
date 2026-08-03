@@ -3,6 +3,11 @@
 This document tracks the implementation against the paper's two-stage
 training procedure.
 
+For a code-level walkthrough from HDF5 data to online actions, see
+[`framework_implementation.md`](framework_implementation.md). For the explicit
+boundary between paper-reported details and reproduction choices, see
+[`reproduction_assumptions.md`](reproduction_assumptions.md).
+
 ## 0. Project and data foundation — complete
 
 - package, environment, and configuration layout;
