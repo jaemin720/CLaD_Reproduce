@@ -19,7 +19,12 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset, Sampler
 
-from clad.models import CLaDStage1Batch, CLaDStage1Model, CLaDStage1Output
+from clad.models import (
+    CLaDStage1Batch,
+    CLaDStage1Config,
+    CLaDStage1Model,
+    CLaDStage1Output,
+)
 
 STAGE1_CHECKPOINT_SCHEMA_VERSION = 2
 
@@ -548,6 +553,14 @@ class Stage1Trainer:
             raise ValueError(
                 f"Unsupported Stage 1 checkpoint schema: {payload.get('schema_version')!r}"
             )
+        stored_model_config = payload.get("model_config")
+        if not isinstance(stored_model_config, Mapping):
+            raise ValueError("Stage 1 checkpoint is missing its model config")
+        checkpoint_model_config = CLaDStage1Config.from_checkpoint_mapping(
+            stored_model_config
+        )
+        if checkpoint_model_config != self.model.config:
+            raise ValueError("Stage 1 model config does not match the checkpoint")
         if schema_version == 1:
             # Schema 1 counted AMP-skipped attempts as global steps. The
             # scheduler advanced only after real optimizer updates, so its

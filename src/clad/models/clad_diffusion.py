@@ -1,8 +1,9 @@
-"""Foresight-conditioned action diffusion for CLaD Stage 2.
+"""Two-modality conditional action diffusion for CLaD and its baselines.
 
 The model implements equation (22): a DDPM noise-prediction objective over
-action chunks, conditioned on the observation-modulated proprioceptive and
-semantic foresights produced by :mod:`clad.models.clad_stage2`.
+action chunks. CLaD uses observation-modulated proprioceptive and semantic
+foresights; Policy-only uses learned current-observation embeddings while
+sharing the same denoiser and diffusion process.
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ from torch import nn
 
 from clad.models.clad_stage2 import (
     CLaDHistoryBatch,
-    CLaDStage2Conditioner,
     Stage2ConditioningOutput,
 )
 
@@ -754,34 +754,38 @@ class DiffusionPolicySample:
 
 
 class CLaDDiffusionPolicy(nn.Module):
-    """Compose frozen CLaD, trainable FiLM, and conditional action DDPM."""
+    """Compose a two-modality conditioner and conditional action DDPM."""
 
     def __init__(
         self,
         *,
-        conditioner: CLaDStage2Conditioner,
+        conditioner: nn.Module,
         config: DiffusionPolicyConfig | None = None,
         action_normalizer: LinearActionNormalizer | None = None,
     ) -> None:
         super().__init__()
         self.conditioner = conditioner
         self.config = config or DiffusionPolicyConfig()
-        backbone_inputs = conditioner.backbone.config.inputs
-        if backbone_inputs.hidden_dim != self.config.condition_dim_per_modality:
+        if not hasattr(conditioner, "input_config") or not hasattr(
+            conditioner, "policy_variant"
+        ):
+            raise TypeError("conditioner must expose input_config and policy_variant")
+        conditioner_inputs = conditioner.input_config
+        if conditioner_inputs.hidden_dim != self.config.condition_dim_per_modality:
             raise ValueError(
-                "CLaD hidden dimension and diffusion condition dimension must match: "
-                f"{backbone_inputs.hidden_dim} != "
+                "Conditioner hidden dimension and diffusion condition dimension must match: "
+                f"{conditioner_inputs.hidden_dim} != "
                 f"{self.config.condition_dim_per_modality}"
             )
-        if backbone_inputs.action_dim != self.config.action_dim:
+        if conditioner_inputs.action_dim != self.config.action_dim:
             raise ValueError(
-                "CLaD and diffusion action dimensions must match: "
-                f"{backbone_inputs.action_dim} != {self.config.action_dim}"
+                "Conditioner and diffusion action dimensions must match: "
+                f"{conditioner_inputs.action_dim} != {self.config.action_dim}"
             )
-        if backbone_inputs.horizon != self.config.horizon:
+        if conditioner_inputs.horizon != self.config.horizon:
             raise ValueError(
-                "CLaD and diffusion horizons must match: "
-                f"{backbone_inputs.horizon} != {self.config.horizon}"
+                "Conditioner and diffusion horizons must match: "
+                f"{conditioner_inputs.horizon} != {self.config.horizon}"
             )
         self.denoiser = ConditionalUnet1D(self.config)
         self.schedule = DDPMSchedule(self.config)
@@ -790,6 +794,10 @@ class CLaDDiffusionPolicy(nn.Module):
             if action_normalizer is not None
             else LinearActionNormalizer(self.config.action_dim)
         )
+
+    @property
+    def policy_variant(self) -> str:
+        return str(self.conditioner.policy_variant)
 
     def forward(
         self,

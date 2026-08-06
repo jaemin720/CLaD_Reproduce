@@ -26,10 +26,12 @@ class LiberoRolloutConfig:
     rollouts_per_task: int = 50
     num_envs: int = 4
     max_steps: int = 600
-    warmup_steps: int = 5
+    warmup_steps: int = 10
+    warmup_gripper_action: float = -1.0
     execution_steps: int = 6
     camera_height: int = 128
     camera_width: int = 128
+    environment_seed: int = 0
     seed: int = 42
     clip_actions: bool = True
     save_videos: bool = False
@@ -61,6 +63,12 @@ class LiberoRolloutConfig:
                 raise ValueError(f"{name} must be positive, got {value}")
         if self.warmup_steps < 0:
             raise ValueError("warmup_steps must be non-negative")
+        if not -1.0 <= self.warmup_gripper_action <= 1.0:
+            raise ValueError("warmup_gripper_action must be in [-1, 1]")
+        if self.environment_seed < 0:
+            raise ValueError("environment_seed must be non-negative")
+        if self.seed < 0:
+            raise ValueError("seed must be non-negative")
         if not self.video_observation_key:
             raise ValueError("video_observation_key cannot be empty")
 
@@ -82,6 +90,7 @@ class EpisodeResult:
     rollout_id: int
     init_state_id: int
     seed: int
+    environment_seed: int
     success: bool
     steps: int
     total_reward: float
@@ -185,6 +194,18 @@ def _is_success(environment: Any, reward: float) -> bool:
     return bool(check_success()) if check_success is not None else False
 
 
+def _warmup_action(action_dim: int, gripper_action: float) -> np.ndarray:
+    """Build the LIBERO no-op used to settle physics with an open gripper."""
+
+    if action_dim <= 0:
+        raise ValueError("action_dim must be positive")
+    if not -1.0 <= gripper_action <= 1.0:
+        raise ValueError("gripper_action must be in [-1, 1]")
+    action = np.zeros(action_dim, dtype=np.float32)
+    action[-1] = gripper_action
+    return action
+
+
 def rollout_episode(
     *,
     environment: Any,
@@ -196,8 +217,10 @@ def rollout_episode(
     rollout_id: int,
     init_state_id: int,
     seed: int,
+    environment_seed: int,
     max_steps: int,
     warmup_steps: int,
+    warmup_gripper_action: float,
     action_dim: int,
     clip_actions: bool,
     video: _VideoSink | None = None,
@@ -205,7 +228,7 @@ def rollout_episode(
     """Run one episode while keeping the CLaD history synchronized with actions."""
 
     sink = video or _NullVideoSink()
-    environment.seed(seed)
+    environment.seed(environment_seed)
     environment.reset()
     observation = environment.set_init_state(np.asarray(initial_state))
     if not isinstance(observation, Mapping):
@@ -221,12 +244,12 @@ def rollout_episode(
     total_reward = 0.0
     success = _is_success(environment, 0.0)
     terminated = False
-    zero_action = np.zeros(action_dim, dtype=np.float32)
+    warmup_action = _warmup_action(action_dim, warmup_gripper_action)
     for _ in range(warmup_steps):
-        observation, reward, done, _ = environment.step(zero_action)
+        observation, reward, done, _ = environment.step(warmup_action)
         reward_value = float(reward)
         total_reward += reward_value
-        policy.observe(zero_action, observation)
+        policy.observe(warmup_action, observation)
         sink.append(observation)
         success = _is_success(environment, reward_value)
         terminated = bool(done) and not success
@@ -268,6 +291,7 @@ def rollout_episode(
         rollout_id=rollout_id,
         init_state_id=init_state_id,
         seed=seed,
+        environment_seed=environment_seed,
         success=success,
         steps=steps,
         total_reward=total_reward,
@@ -350,8 +374,10 @@ def rollout_episode_batch(
     rollout_ids: Sequence[int],
     init_state_ids: Sequence[int],
     seeds: Sequence[int],
+    environment_seed: int,
     max_steps: int,
     warmup_steps: int,
+    warmup_gripper_action: float,
     action_dim: int,
     clip_actions: bool,
     videos: Sequence[_VideoSink] | None = None,
@@ -378,10 +404,10 @@ def rollout_episode_batch(
 
     vector_size = len(environment)
     seed_batch: list[int | None] = [None] * vector_size
-    for slot_id, seed in zip(slots, episode_seeds, strict=True):
+    for slot_id in slots:
         if not 0 <= slot_id < vector_size:
             raise ValueError(f"slot_id {slot_id} is outside vector environment")
-        seed_batch[slot_id] = seed
+        seed_batch[slot_id] = environment_seed
     environment.seed(seed_batch)
     environment.reset(id=list(slots))
     raw_observations = environment.set_init_state(
@@ -424,7 +450,11 @@ def rollout_episode_batch(
     for _ in range(warmup_steps):
         if not active:
             break
-        actions = np.zeros((len(active), action_dim), dtype=np.float32)
+        actions = np.repeat(
+            _warmup_action(action_dim, warmup_gripper_action)[None, :],
+            len(active),
+            axis=0,
+        )
         observations, rewards, dones = _vector_step(environment, actions, active)
         policy.observe_batch(slot_ids=active, actions=actions, observations=observations)
         success_flags = _success_by_slot(environment, active)
@@ -502,6 +532,7 @@ def rollout_episode_batch(
             rollout_id=progress[slot_id].rollout_id,
             init_state_id=progress[slot_id].init_state_id,
             seed=progress[slot_id].seed,
+            environment_seed=environment_seed,
             success=progress[slot_id].success,
             steps=progress[slot_id].steps,
             total_reward=progress[slot_id].total_reward,
@@ -723,8 +754,10 @@ def evaluate_libero(
                             rollout_ids=rollout_batch,
                             init_state_ids=init_state_ids,
                             seeds=episode_seeds,
+                            environment_seed=config.environment_seed,
                             max_steps=config.max_steps,
                             warmup_steps=config.warmup_steps,
+                            warmup_gripper_action=config.warmup_gripper_action,
                             action_dim=policy.model.config.action_dim,
                             clip_actions=config.clip_actions,
                             videos=videos,

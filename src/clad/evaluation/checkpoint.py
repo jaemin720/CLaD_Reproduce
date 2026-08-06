@@ -1,4 +1,4 @@
-"""Inference-only restoration of Stage 2 raw or EMA policy weights."""
+"""Inference-only restoration of CLaD or Policy-only raw/EMA weights."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from clad.models import (
     CLaDForesightBackbone,
     CLaDStage2Conditioner,
     DiffusionPolicyConfig,
+    PolicyOnlyConditioner,
+    PolicyOnlyConditionerConfig,
     Stage2ConditionerConfig,
 )
 from clad.training.stage2_trainer import (
@@ -33,7 +35,8 @@ class Stage2PolicyCheckpointInfo:
     attempt_step: int
     weights: str
     ema_optimization_step: int | None
-    foresight_checkpoint: ForesightCheckpointIdentity
+    policy_variant: str
+    foresight_checkpoint: ForesightCheckpointIdentity | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +111,7 @@ def _resolve_backbone_dtype(
 def load_stage2_policy(
     checkpoint: str | Path,
     *,
-    foresight_checkpoint: str | Path,
+    foresight_checkpoint: str | Path | None = None,
     device: torch.device | str = "cpu",
     weights: str = "ema",
     backbone_dtype: str | torch.dtype = "auto",
@@ -116,10 +119,10 @@ def load_stage2_policy(
 ) -> LoadedStage2Policy:
     """Reconstruct a policy without loading optimizer state onto the device.
 
-    The trainer checkpoint stores only Stage 2 trainable parameters and refers
-    to the frozen Stage 1 artifact by hash. The full checkpoint is memory-mapped
-    when supported, so the multi-gigabyte optimizer state is not materialized
-    for inference.
+    CLaD checkpoints refer to the frozen Stage 1 artifact by hash, whereas
+    Policy-only checkpoints have no Stage 1 dependency. The full checkpoint is
+    memory-mapped when supported, so optimizer state is not materialized for
+    inference.
     """
 
     if weights not in {"ema", "raw"}:
@@ -131,10 +134,6 @@ def load_stage2_policy(
     checkpoint_path = Path(checkpoint).expanduser().resolve()
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Stage 2 checkpoint does not exist: {checkpoint_path}")
-    foresight_path = Path(foresight_checkpoint).expanduser().resolve()
-    if not foresight_path.is_file():
-        raise FileNotFoundError(f"Frozen foresight checkpoint does not exist: {foresight_path}")
-
     checkpoint_sha256 = sha256_file(checkpoint_path)
     payload = _load_checkpoint(checkpoint_path)
     if int(payload.get("schema_version", -1)) != STAGE2_CHECKPOINT_SCHEMA_VERSION:
@@ -142,34 +141,49 @@ def load_stage2_policy(
             f"Unsupported Stage 2 checkpoint schema: {payload.get('schema_version')!r}"
         )
 
-    stored_foresight = ForesightCheckpointIdentity.from_mapping(
-        _mapping_field(payload, "foresight_checkpoint")
-    )
-    actual_foresight = ForesightCheckpointIdentity.from_path(foresight_path)
-    if verify_foresight and not actual_foresight.matches(stored_foresight):
-        raise ValueError(
-            "Frozen foresight checkpoint does not match the Stage 2 checkpoint: "
-            f"expected sha256={stored_foresight.sha256}, "
-            f"actual sha256={actual_foresight.sha256}"
-        )
-
+    policy_variant = str(payload.get("policy_variant", "clad"))
     policy_config = DiffusionPolicyConfig.from_mapping(
         _mapping_field(payload, "policy_config")
     )
-    conditioner_config = Stage2ConditionerConfig.from_mapping(
-        _mapping_field(payload, "conditioner_config")
-    )
-    backbone = CLaDForesightBackbone.from_checkpoint(
-        foresight_path,
-        dtype=_resolve_backbone_dtype(backbone_dtype, resolved_device),
-    )
-    model = CLaDDiffusionPolicy(
-        conditioner=CLaDStage2Conditioner(
-            backbone=backbone,
-            config=conditioner_config,
-        ),
-        config=policy_config,
-    )
+    actual_foresight: ForesightCheckpointIdentity | None = None
+    if policy_variant == "clad":
+        if foresight_checkpoint is None:
+            raise ValueError("CLaD checkpoint loading requires --foresight-checkpoint")
+        foresight_path = Path(foresight_checkpoint).expanduser().resolve()
+        if not foresight_path.is_file():
+            raise FileNotFoundError(
+                f"Frozen foresight checkpoint does not exist: {foresight_path}"
+            )
+        stored_foresight = ForesightCheckpointIdentity.from_mapping(
+            _mapping_field(payload, "foresight_checkpoint")
+        )
+        actual_foresight = ForesightCheckpointIdentity.from_path(foresight_path)
+        if verify_foresight and not actual_foresight.matches(stored_foresight):
+            raise ValueError(
+                "Frozen foresight checkpoint does not match the Stage 2 checkpoint: "
+                f"expected sha256={stored_foresight.sha256}, "
+                f"actual sha256={actual_foresight.sha256}"
+            )
+        conditioner = CLaDStage2Conditioner(
+            backbone=CLaDForesightBackbone.from_checkpoint(
+                foresight_path,
+                dtype=_resolve_backbone_dtype(backbone_dtype, resolved_device),
+            ),
+            config=Stage2ConditionerConfig.from_mapping(
+                _mapping_field(payload, "conditioner_config")
+            ),
+        )
+    elif policy_variant == "policy_only":
+        if payload.get("foresight_checkpoint") is not None:
+            raise ValueError("Policy-only checkpoint must not reference frozen foresight")
+        conditioner = PolicyOnlyConditioner(
+            PolicyOnlyConditionerConfig.from_checkpoint_mapping(
+                _mapping_field(payload, "conditioner_config")
+            )
+        )
+    else:
+        raise ValueError(f"Unsupported Stage 2 policy variant: {policy_variant!r}")
+    model = CLaDDiffusionPolicy(conditioner=conditioner, config=policy_config)
 
     ema_optimization_step: int | None = None
     if weights == "ema":
@@ -199,6 +213,7 @@ def load_stage2_policy(
         attempt_step=int(payload["attempt_step"]),
         weights=weights,
         ema_optimization_step=ema_optimization_step,
+        policy_variant=policy_variant,
         foresight_checkpoint=actual_foresight,
     )
     return LoadedStage2Policy(model=model, info=info)

@@ -14,6 +14,11 @@ from torch.utils.data import Dataset
 from clad.data.camera import camera_view_name, normalize_camera_keys
 from clad.data.sequence_sampler import WindowIndex, build_window_indices
 from clad.data.task_registry import LiberoTask, discover_libero_tasks, list_demo_keys
+from clad.proprioception import (
+    LEGACY_ROBOT_STATE,
+    LIBERO_JOINT_GRIPPER,
+    proprioception_spec,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +26,10 @@ class LiberoDatasetConfig:
     dataset_dir: str | Path
     file_pattern: str = "*_demo.hdf5"
     camera_keys: tuple[str, ...] = ("obs/agentview_rgb",)
-    proprio_key: str = "robot_states"
+    proprioception: str = LIBERO_JOINT_GRIPPER
+    # Compatibility for older callers. New configs should use the named
+    # ``proprioception`` contract so offline and live fields cannot diverge.
+    proprio_key: str | None = None
     action_key: str = "actions"
     horizon: int = 6
     include_images: bool = True
@@ -36,6 +44,20 @@ class LiberoDatasetConfig:
         else:
             normalized = tuple(self.camera_keys)
         object.__setattr__(self, "camera_keys", normalized)
+        if self.proprio_key is not None:
+            if not self.proprio_key:
+                raise ValueError("proprio_key cannot be empty")
+            if self.proprio_key != "robot_states":
+                raise ValueError(
+                    "Custom proprio_key is no longer supported; use a named "
+                    "proprioception contract"
+                )
+            object.__setattr__(self, "proprioception", LEGACY_ROBOT_STATE)
+        proprioception_spec(self.proprioception)
+
+    @property
+    def proprio_keys(self) -> tuple[str, ...]:
+        return proprioception_spec(self.proprioception).hdf5_keys
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +91,7 @@ class LiberoWindowDataset(Dataset[dict[str, Any]]):
         self._index_dataset()
 
     def _index_dataset(self) -> None:
-        required_keys = [self.config.proprio_key, self.config.action_key]
+        required_keys = [*self.config.proprio_keys, self.config.action_key]
         if self.config.include_images:
             required_keys.extend(self.config.camera_keys)
 
@@ -104,11 +126,24 @@ class LiberoWindowDataset(Dataset[dict[str, Any]]):
                                 f"{dataset.shape[0]} != {length}"
                             )
 
-                    proprio_dataset = demo_group[self.config.proprio_key]
-                    if proprio_dataset.ndim != 2:
+                    component_dims: list[int] = []
+                    for proprio_key in self.config.proprio_keys:
+                        proprio_dataset = demo_group[proprio_key]
+                        if proprio_dataset.ndim != 2:
+                            raise ValueError(
+                                f"Proprioception component {proprio_key!r} must have "
+                                f"shape [T, D], got {proprio_dataset.shape} in "
+                                f"{task.path}:{demo_key}"
+                            )
+                        component_dims.append(int(proprio_dataset.shape[1]))
+                    expected_dims = proprioception_spec(
+                        self.config.proprioception
+                    ).hdf5_component_dims
+                    if tuple(component_dims) != expected_dims:
                         raise ValueError(
-                            f"Proprioception must have shape [T, Dp], got "
-                            f"{proprio_dataset.shape} in {task.path}:{demo_key}"
+                            "Proprioception component dimensions do not match "
+                            f"{self.config.proprioception!r}: expected={expected_dims}, "
+                            f"actual={tuple(component_dims)} in {task.path}:{demo_key}"
                         )
 
                     if self.config.include_images:
@@ -158,6 +193,13 @@ class LiberoWindowDataset(Dataset[dict[str, Any]]):
         array = np.asarray(dataset[index], dtype=np.float32)
         return torch.from_numpy(array)
 
+    def _proprio_tensor(self, demo_group: h5py.Group, index: int) -> torch.Tensor:
+        components = [
+            self._float_tensor(demo_group[key], index)
+            for key in self.config.proprio_keys
+        ]
+        return components[0] if len(components) == 1 else torch.cat(components, dim=-1)
+
     @staticmethod
     def _image_tensor(dataset: h5py.Dataset, index: int) -> torch.Tensor:
         array = np.asarray(dataset[index], dtype=np.uint8)
@@ -170,7 +212,6 @@ class LiberoWindowDataset(Dataset[dict[str, Any]]):
 
         tau = self.config.horizon
         t = window.anchor_step
-        proprio = demo_group[self.config.proprio_key]
         actions = demo_group[self.config.action_key]
 
         sample: dict[str, Any] = {
@@ -178,9 +219,9 @@ class LiberoWindowDataset(Dataset[dict[str, Any]]):
             "episode_id": window.demo_key,
             "anchor_step": t,
             "instruction": task.instruction,
-            "proprio_prev": self._float_tensor(proprio, t - tau),
-            "proprio_now": self._float_tensor(proprio, t),
-            "proprio_future": self._float_tensor(proprio, t + tau),
+            "proprio_prev": self._proprio_tensor(demo_group, t - tau),
+            "proprio_now": self._proprio_tensor(demo_group, t),
+            "proprio_future": self._proprio_tensor(demo_group, t + tau),
             "past_actions": self._float_tensor(actions, slice(t - tau, t)),
             "target_actions": self._float_tensor(actions, slice(t, t + tau)),
         }

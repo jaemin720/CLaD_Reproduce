@@ -25,6 +25,7 @@ paper:
 - [x] Stage 2 conditional diffusion policy and DDPM objective
 - [x] Stage 2 trainer and checkpointing
 - [x] EMA policy loading and LIBERO-LONG rollout evaluation
+- [x] observation-conditioned Policy-only diagnostic baseline
 
 ## Architecture documentation
 
@@ -39,6 +40,11 @@ paper:
   divergences, and corrections made during the audit.
 - [`docs/implementation_plan.md`](docs/implementation_plan.md) tracks completed
   components and remaining evaluation/ablation work.
+- [`docs/policy_only_baseline.md`](docs/policy_only_baseline.md) defines the
+  CLaD-free observation baseline, training commands, and result interpretation.
+- [`docs/libero_dataset_rerendering.md`](docs/libero_dataset_rerendering.md)
+  documents the OpenVLA-style native-256 LIBERO replay/regeneration path while
+  retaining the repository's HDF5 data contract.
 
 ## Local data layout
 
@@ -71,6 +77,14 @@ assumption, not a paper-reported setting. A multi-view experiment can add
 `obs/eye_in_hand_rgb` to `camera_keys` without changing the dataset or batch
 interface. DecisionNCE encodes each view independently, and the CLaD semantic
 input encoder performs configurable view fusion rather than the HDF5 loader.
+
+New training follows the official LIBERO policy state ordering:
+`obs/joint_states` (7D) followed by `obs/gripper_states` (2D). Live rollout
+uses the matching `robot0_joint_pos + robot0_gripper_qpos` order. Historical
+checkpoints created before this named contract retain their EEF-based
+`robot_states` interpretation automatically; they cannot be silently resumed
+with the new state semantics. This state-only change does not require rebuilding
+the image/text DecisionNCE cache.
 
 ## Development setup
 
@@ -107,6 +121,12 @@ python scripts/inspect_dataset.py \
   --dataset-dir /path/to/libero_datasets/libero_10 \
   --horizon 6
 ```
+
+To build a separate native-256 dataset with successful-replay selection,
+no-op filtering, both LIBERO camera views, and reproducible image-orientation
+metadata, follow
+[`docs/libero_dataset_rerendering.md`](docs/libero_dataset_rerendering.md).
+This path preserves HDF5 and does not require RLDS or LeRobot.
 
 Run the current tests:
 
@@ -164,7 +184,7 @@ export LIBERO_DATASET_DIR=/path/to/libero_datasets/libero_10
 
 The console displays compact one-line progress with smoothed step time and
 ETA. Full metrics are appended to
-`outputs/clad_stage1/train_metrics.jsonl`, the resolved configuration is saved
+`outputs/clad_stage1_official/train_metrics.jsonl`, the resolved configuration is saved
 per run, and the complete console output is appended to `train_console.log`.
 
 The defaults in `configs/train/stage1.yaml` use the paper-reported 25,000
@@ -176,13 +196,13 @@ overflow attempts are logged separately and do not consume the 25K successful
 optimizer-step budget.
 
 The trainer writes one atomically replaced checkpoint at
-`outputs/clad_stage1/stage1_latest.pt`. It contains online and EMA model
+`outputs/clad_stage1_official/stage1_latest.pt`. It contains online and EMA model
 weights, optimizer, scheduler, AMP scaler, RNG, exact shuffled data position,
 and global step. Resume the same run configuration with:
 
 ```bash
 ./scripts/train_stage1.sh \
-  --resume outputs/clad_stage1/stage1_latest.pt
+  --resume outputs/clad_stage1_official/stage1_latest.pt
 ```
 
 For a fast plumbing check, the CLI also accepts `--max-steps`, `--batch-size`,
@@ -206,6 +226,20 @@ Stage 2 optimizer/EMA assumptions, launch commands, logging, and exact-resume
 checkpoint behavior are documented in
 [`docs/stage2_training.md`](docs/stage2_training.md).
 The paper-scale run starts with `./scripts/train_stage2.sh`.
+
+For reproduction diagnosis, the Policy-only baseline removes Stage 1 and
+conditions the same diffusion U-Net directly on current proprioception and
+language-conditioned DecisionNCE features. Its full training and evaluation
+commands are in [`docs/policy_only_baseline.md`](docs/policy_only_baseline.md).
+An already-running Policy-only job can hand off directly to evaluation with
+`./scripts/evaluate_policy_only_when_ready.sh GPU_ID`.
+The new single-view launcher writes to `outputs/policy_only_official` by
+default so a historical `outputs/policy_only` checkpoint is not overwritten.
+The controlled external-plus-wrist-camera variant uses
+`./scripts/cache_decisionnce_two_view.sh`,
+`./scripts/train_policy_only_two_view.sh`, and
+`./scripts/evaluate_policy_only_two_view.sh GPU_ID`; its checkpoint records and
+validates the exact two-view contract.
 
 ## LIBERO evaluation
 

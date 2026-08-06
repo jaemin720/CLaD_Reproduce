@@ -14,6 +14,8 @@ from dataclasses import dataclass
 import torch
 from torch import nn
 
+from clad.proprioception import LIBERO_JOINT_GRIPPER, proprioception_spec
+
 VisionFeatures = torch.Tensor | Mapping[str, torch.Tensor]
 
 
@@ -33,6 +35,7 @@ class CLaDInputEncoderConfig:
     action_mask_ratio: float = 0.3
     tokenizer_dropout: float = 0.0
     view_fusion: str = "mean"
+    proprioception: str = LIBERO_JOINT_GRIPPER
 
     def __post_init__(self) -> None:
         positive_dimensions = {
@@ -57,6 +60,7 @@ class CLaDInputEncoderConfig:
             raise ValueError(
                 f"Only view_fusion='mean' is currently implemented, got {self.view_fusion!r}"
             )
+        proprioception_spec(self.proprioception)
 
 
 @dataclass(frozen=True, slots=True)

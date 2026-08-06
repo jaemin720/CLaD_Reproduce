@@ -2,17 +2,18 @@
 set -euo pipefail
 
 CLAD_PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CLAD_OUTPUT_DIR="${CLAD_STAGE1_OUTPUT_DIR:-$CLAD_PROJECT_DIR/outputs/clad_stage1_official}"
+CLAD_OUTPUT_DIR="${CLAD_POLICY_ONLY_OUTPUT_DIR:-$CLAD_PROJECT_DIR/outputs/policy_only_official}"
 : "${LIBERO_DATASET_DIR:?Set LIBERO_DATASET_DIR to the absolute libero_10 directory}"
 
 mkdir -p "$CLAD_OUTPUT_DIR"
 cd "$CLAD_PROJECT_DIR"
 
 echo "Console log: $CLAD_OUTPUT_DIR/train_console.log"
-python scripts/train_clad_stage1.py \
+python scripts/train_clad_stage2.py \
+  --policy-variant policy_only \
   --data-config configs/data/libero_long.yaml \
-  --model-config configs/model/clad_stage1.yaml \
-  --train-config configs/train/stage1.yaml \
+  --model-config configs/model/policy_only.yaml \
+  --train-config configs/train/stage2.yaml \
   --dataset-dir "$LIBERO_DATASET_DIR" \
   --cache-dir .cache/decisionnce/libero_long \
   --output-dir "$CLAD_OUTPUT_DIR" \

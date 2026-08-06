@@ -13,10 +13,12 @@ rollouts_per_task: 50
 num_envs: 4
 max_steps: 600
 
-# Official LIBERO evaluation settles physics with five zero actions. CLaD's
-# six-step history is left-padded by repeating the initial observation and
-# inserting zero actions until real history is available.
-warmup_steps: 5
+# Match the native-256/OpenVLA-style regeneration protocol: settle for ten
+# steps while explicitly commanding the Panda gripper open (-1). A zero
+# gripper command targets the controller midpoint and can partially close an
+# initially open gripper. CLaD history observes these exact warm-up actions.
+warmup_steps: 10
+warmup_gripper_action: -1.0
 
 # The paper generates six-action chunks but does not state the deployment
 # replanning interval. Executing all six is the default reproduction choice;
@@ -25,6 +27,9 @@ execution_steps: 6
 
 camera_height: 128
 camera_width: 128
+# Keep simulator placement randomness separate from per-episode DDPM noise.
+# The regenerated dataset and OpenVLA LIBERO environment both use seed 0.
+environment_seed: 0
 seed: 42
 clip_actions: true
 save_videos: false

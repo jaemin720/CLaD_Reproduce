@@ -14,7 +14,7 @@ foresight checkpoint:
 
 ```text
 .cache/decisionnce/libero_long/manifest.json
-outputs/clad_stage1/stage1_foresight.pt
+outputs/clad_stage1_official/stage1_foresight.pt
 ```
 
 The full `stage1_latest.pt` is accepted but not recommended. The compact file
@@ -30,17 +30,21 @@ export LIBERO_DATASET_DIR=/path/to/libero_datasets/libero_10
 ./scripts/train_stage2.sh
 ```
 
+launcher는 `outputs/clad_stage1_official/stage1_foresight.pt`를 읽고
+`outputs/clad_stage2_official`에 쓴다. 이전 EEF 기반 Stage 1/2 artifact와 신규
+joint+gripper 실험을 같은 directory에 섞지 않는다.
+
 The defaults come from `configs/model/clad_stage2.yaml` and
 `configs/train/stage2.yaml`: 200,000 successful optimizer updates, batch size
 128, the approximately 0.23B policy, fp16 AMP, and policy EMA. Complete
-console output is also appended to `outputs/clad_stage2/train_console.log`.
+console output is also appended to `outputs/clad_stage2_official/train_console.log`.
 
 Additional CLI overrides are passed through. For example, resume the same run
 with:
 
 ```bash
 ./scripts/train_stage2.sh \
-  --resume outputs/clad_stage2/stage2_latest.pt
+  --resume outputs/clad_stage2_official/stage2_latest.pt
 ```
 
 ## What happens before the first step
@@ -64,7 +68,7 @@ Run this before the 200K-step job:
 python scripts/train_clad_stage2.py \
   --dataset-dir "$LIBERO_DATASET_DIR" \
   --cache-dir .cache/decisionnce/libero_long \
-  --foresight-checkpoint outputs/clad_stage1/stage1_foresight.pt \
+  --foresight-checkpoint outputs/clad_stage1_official/stage1_foresight.pt \
   --output-dir outputs/clad_stage2_full_smoke \
   --device cuda \
   --max-steps 1 \
@@ -89,7 +93,7 @@ Console progress is compact and includes ETA, loss, gradient norm, learning
 rate, AMP scale, and skipped updates. Complete records are appended to:
 
 ```text
-outputs/clad_stage2/train_metrics.jsonl
+outputs/clad_stage2_official/train_metrics.jsonl
 ```
 
 Resolved dataset/model/trainer settings, action bounds, parameter counts, and
@@ -112,7 +116,7 @@ foresight artifact:
 
 ```bash
 ./scripts/train_stage2.sh \
-  --resume outputs/clad_stage2/stage2_latest.pt
+  --resume outputs/clad_stage2_official/stage2_latest.pt
 ```
 
 AMP-overflow attempts do not consume the 200K optimizer-step budget and do not

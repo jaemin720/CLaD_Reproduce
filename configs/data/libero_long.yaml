@@ -9,10 +9,10 @@ file_pattern: "*_demo.hdf5"
 camera_keys:
   - obs/agentview_rgb
 
-# Reproduction default from the official LIBERO HDF5 schema. This 9D vector is
-# not the joint-angle-and-velocity contract described generically in the paper;
-# the exact author-side proprioception fields are not reported.
-proprio_key: robot_states
+# Official LIBERO policy observation fields: joint position 7D followed by
+# gripper position 2D. The legacy EEF-based robot_states contract remains
+# available by setting proprioception: robot_states explicitly.
+proprioception: libero_joint_gripper
 action_key: actions
 
 # Paper setting: action and foresight horizon tau = 6.

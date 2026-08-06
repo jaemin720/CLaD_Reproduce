@@ -128,9 +128,12 @@ t = τ, τ+1, ..., T-τ-1
 
 ### 3.3 Raw sample
 
-dataset은 `robot_states`와 `actions`를 float32 tensor로 읽는다. raw image mode는
-`uint8 [H,W,3]`를 반환하지만 실제 학습 entry point는 `include_images=False`로
-설정하고 다음 phase의 cached feature를 결합한다.
+dataset은 공식 LIBERO policy observation 순서대로 `obs/joint_states` 7D와
+`obs/gripper_states` 2D를 연결하고 `actions`와 함께 float32 tensor로 읽는다.
+raw image mode는 `uint8 [H,W,3]`를 반환하지만 실제 학습 entry point는
+`include_images=False`로 설정하고 다음 phase의 cached feature를 결합한다.
+이전 `robot_states` 9D 경로는 기존 checkpoint 재현용 named legacy contract로만
+남아 있다.
 
 ## 4. Phase 1: frozen DecisionNCE feature cache
 
@@ -310,7 +313,7 @@ AMP overflow이면 5--7을 실행하지 않고 attempt/skip counter만 증가한
 ### 5.7 Stage 1 artifacts
 
 ```text
-outputs/clad_stage1/
+outputs/clad_stage1_official/
 ├── stage1_latest.pt          # model + targets + optimizer + resume state
 ├── train_metrics.jsonl
 ├── train_console.log
@@ -423,7 +426,7 @@ trainable parameter EMA를 갱신한다.
 ### 7.5 Stage 2 checkpoint
 
 ```text
-outputs/clad_stage2/stage2_latest.pt
+outputs/clad_stage2_official/stage2_latest.pt
 ```
 
 이 파일은 다음을 포함한다.
@@ -470,7 +473,10 @@ manifest에서 model name, source revision, checkpoint hash, camera view를 읽�
   LIBERO benchmark와 정확히 대조한다.
 - live RGB frame만 동일한 DecisionNCE adapter로 매 environment step encode한다.
 - camera view 집합이 training cache와 정확히 같아야 한다.
-- live proprioception은 gripper qpos, EEF position, EEF quaternion으로 9D를 만든다.
+- live proprioception은 checkpoint에 기록된 named contract를 따른다. 신규
+  checkpoint는 `robot0_joint_pos` 7D 뒤에 `robot0_gripper_qpos` 2D를 연결한다.
+  필드가 없는 기존 checkpoint만 gripper qpos, EEF position, EEF quaternion의
+  레거시 9D 순서를 사용한다.
 
 ### 8.3 Online history buffer
 
@@ -521,7 +527,7 @@ process에 한 번만 존재하고 environment subprocess에는 복제하지 않
 ### 8.6 Evaluation outputs
 
 ```text
-outputs/clad_evaluation/
+outputs/clad_evaluation_official/
 ├── run_identity.json       # checkpoint/cache hash와 protocol
 ├── episode_results.jsonl   # episode별 append-only record
 ├── summary.json            # task별 및 전체 success rate

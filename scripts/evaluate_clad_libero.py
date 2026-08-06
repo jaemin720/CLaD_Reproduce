@@ -36,19 +36,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        default=Path("outputs/clad_stage2/stage2_latest.pt"),
+        default=Path("outputs/clad_stage2_official/stage2_latest.pt"),
     )
     parser.add_argument(
         "--foresight-checkpoint",
         type=Path,
-        default=Path("outputs/clad_stage1/stage1_foresight.pt"),
+        default=Path("outputs/clad_stage1_official/stage1_foresight.pt"),
     )
     parser.add_argument(
         "--cache-dir",
         type=Path,
         default=Path(".cache/decisionnce/libero_long"),
     )
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs/clad_evaluation"))
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("outputs/clad_evaluation_official"),
+    )
     parser.add_argument(
         "--libero-config-dir",
         type=Path,
@@ -61,6 +65,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--weights", choices=("ema", "raw"), default="ema")
     parser.add_argument(
+        "--require-step",
+        type=int,
+        help="Refuse evaluation unless checkpoint global_step equals this value.",
+    )
+    parser.add_argument(
         "--frozen-backbone-dtype",
         choices=("auto", "float16", "bfloat16", "float32"),
         default="auto",
@@ -70,8 +79,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-envs", type=int)
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--warmup-steps", type=int)
+    parser.add_argument("--warmup-gripper-action", type=float)
     parser.add_argument("--execution-steps", type=int)
+    parser.add_argument("--camera-height", type=int)
+    parser.add_argument("--camera-width", type=int)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--environment-seed", type=int)
     parser.add_argument("--render-gpu-device-id", type=int)
     parser.add_argument(
         "--camera",
@@ -110,8 +123,12 @@ def _rollout_config(args: argparse.Namespace) -> LiberoRolloutConfig:
         "num_envs": args.num_envs,
         "max_steps": args.max_steps,
         "warmup_steps": args.warmup_steps,
+        "warmup_gripper_action": args.warmup_gripper_action,
         "execution_steps": args.execution_steps,
+        "camera_height": args.camera_height,
+        "camera_width": args.camera_width,
         "seed": args.seed,
+        "environment_seed": args.environment_seed,
         "render_gpu_device_id": args.render_gpu_device_id,
         "save_videos": args.save_videos,
         "resume": args.resume,
@@ -142,19 +159,26 @@ def _camera_mapping(values: list[str] | None) -> dict[str, str] | None:
 
 def _checkpoint_summary(loaded: Any) -> dict[str, Any]:
     info = loaded.info
-    return {
+    summary = {
         "checkpoint": str(info.path),
         "checkpoint_sha256": info.sha256,
         "global_step": info.global_step,
         "attempt_step": info.attempt_step,
         "weights": info.weights,
         "ema_optimization_step": info.ema_optimization_step,
-        "foresight_checkpoint": str(info.foresight_checkpoint.path),
-        "foresight_sha256": info.foresight_checkpoint.sha256,
+        "policy_variant": info.policy_variant,
         "policy_config": asdict(loaded.model.config),
         "conditioner_config": asdict(loaded.model.conditioner.config),
         "parameters_total": sum(parameter.numel() for parameter in loaded.model.parameters()),
     }
+    if info.foresight_checkpoint is not None:
+        summary.update(
+            {
+                "foresight_checkpoint": str(info.foresight_checkpoint.path),
+                "foresight_sha256": info.foresight_checkpoint.sha256,
+            }
+        )
+    return summary
 
 
 def main() -> None:
@@ -181,15 +205,25 @@ def main() -> None:
         weights=args.weights,
         backbone_dtype=args.frozen_backbone_dtype,
     )
+    if args.require_step is not None and loaded.info.global_step != args.require_step:
+        raise ValueError(
+            "Checkpoint global step does not match --require-step: "
+            f"{loaded.info.global_step} != {args.require_step}"
+        )
     checkpoint_summary = _checkpoint_summary(loaded)
-    print("CLaD Stage 2 policy checkpoint loaded", flush=True)
+    print("Diffusion policy checkpoint loaded", flush=True)
     print(
-        f"  step={loaded.info.global_step:,} | weights={loaded.info.weights} | "
+        f"  variant={loaded.info.policy_variant} | step={loaded.info.global_step:,} | "
+        f"weights={loaded.info.weights} | "
         f"device={device} | parameters={checkpoint_summary['parameters_total']:,}",
         flush=True,
     )
     print(f"  checkpoint_sha256={loaded.info.sha256}", flush=True)
-    print(f"  foresight_sha256={loaded.info.foresight_checkpoint.sha256}", flush=True)
+    if loaded.info.foresight_checkpoint is not None:
+        print(
+            f"  foresight_sha256={loaded.info.foresight_checkpoint.sha256}",
+            flush=True,
+        )
     if args.checkpoint_only:
         print(json.dumps(checkpoint_summary, indent=2, sort_keys=True), flush=True)
         return
@@ -204,8 +238,20 @@ def main() -> None:
         args.cache_dir,
         device=str(device),
         camera_observation_keys=camera_mapping,
+        proprioception=loaded.model.conditioner.input_config.proprioception,
     )
     try:
+        evaluation_image_size = (config.camera_height, config.camera_width)
+        if (
+            encoder.source_image_size is not None
+            and evaluation_image_size != encoder.source_image_size
+        ):
+            raise ValueError(
+                "Evaluation render size must match the regenerated training data: "
+                f"evaluation={evaluation_image_size}, "
+                f"training={encoder.source_image_size}. Pass --camera-height and "
+                "--camera-width explicitly."
+            )
         policy = CLaDOnlinePolicy(
             model=loaded.model,
             encoder=encoder,
@@ -225,13 +271,19 @@ def main() -> None:
             "camera_observation_keys": (
                 camera_mapping if camera_mapping is not None else encoder.camera_observation_keys
             ),
+            "proprioception": encoder.proprioception,
+            "image_transform": encoder.image_transform,
+            "source_image_size": encoder.source_image_size,
         }
         recorder = EvaluationRecorder(
             args.output_dir,
             run_identity=run_identity,
             resume=config.resume,
         )
-        print("CLaD LIBERO rollout evaluation", flush=True)
+        print(
+            f"{loaded.info.policy_variant} LIBERO rollout evaluation",
+            flush=True,
+        )
         print(
             f"  suite={config.suite_name} | tasks="
             f"{list(config.task_ids) if config.task_ids else 'all'} | "
@@ -240,7 +292,18 @@ def main() -> None:
         )
         print(
             f"  max_steps={config.max_steps} | warmup={config.warmup_steps} | "
+            f"warmup_gripper={config.warmup_gripper_action:+.1f} | "
             f"execute={config.execution_steps}/{loaded.model.config.horizon}",
+            flush=True,
+        )
+        print(
+            f"  environment_seed={config.environment_seed} | "
+            f"policy_seed_base={config.seed}",
+            flush=True,
+        )
+        print(
+            f"  render={config.camera_height}x{config.camera_width} | "
+            f"image_transform={encoder.image_transform}",
             flush=True,
         )
         print(f"  results={recorder.results_path}", flush=True)

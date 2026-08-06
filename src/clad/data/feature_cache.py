@@ -20,6 +20,7 @@ import numpy as np
 import torch
 
 from clad.data.camera import camera_view_name, normalize_camera_keys
+from clad.data.libero_rerender import RERENDER_METADATA_KEYS
 from clad.data.task_registry import LiberoTask, discover_libero_tasks, list_demo_keys
 from clad.models.decisionnce_adapter import DecisionNCEAdapter
 
@@ -70,13 +71,31 @@ def _stable_digest(payload: dict[str, Any]) -> str:
 
 def _source_identity(task: LiberoTask) -> dict[str, Any]:
     stat = task.path.stat()
-    return {
+    identity: dict[str, Any] = {
         "path": str(task.path),
         "size": stat.st_size,
         "mtime_ns": stat.st_mtime_ns,
         "instruction": task.instruction,
         "num_demos": task.num_demos,
     }
+    # Optional and backward compatible: old 128px datasets keep exactly their
+    # previous identity, while regenerated data carries enough information for
+    # online evaluation to reproduce its image geometry.
+    with h5py.File(task.path, "r") as handle:
+        attrs = handle["data"].attrs
+        metadata: dict[str, Any] = {}
+        for key in RERENDER_METADATA_KEYS:
+            if key not in attrs:
+                continue
+            value = attrs[key]
+            if isinstance(value, bytes):
+                value = value.decode("utf-8")
+            elif isinstance(value, np.generic):
+                value = value.item()
+            metadata[key] = value
+    if metadata:
+        identity["dataset_metadata"] = metadata
+    return identity
 
 
 def _task_fingerprint(task: LiberoTask, spec: FeatureCacheSpec) -> str:
@@ -343,6 +362,25 @@ class DecisionNCEFeatureCache:
         """Source HDF5 camera keys encoded into this cache."""
 
         return normalize_camera_keys(self.manifest["spec"]["camera_keys"])
+
+    @property
+    def dataset_metadata(self) -> dict[str, Any]:
+        """Common regenerated-dataset metadata, or an empty mapping for legacy data."""
+
+        metadata_values = [
+            dict(entry.get("source", {}).get("dataset_metadata", {}))
+            for entry in self.manifest["tasks"]
+        ]
+        nonempty = [value for value in metadata_values if value]
+        if not nonempty:
+            return {}
+        if len(nonempty) != len(metadata_values) or any(
+            value != nonempty[0] for value in nonempty[1:]
+        ):
+            raise ValueError(
+                "DecisionNCE cache mixes datasets with different rerender metadata"
+            )
+        return nonempty[0]
 
     def _get_file(self, task_id: str) -> h5py.File:
         if task_id not in self._task_paths:

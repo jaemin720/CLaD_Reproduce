@@ -1,4 +1,4 @@
-"""Single-GPU trainer for Stage 2 foresight-conditioned action diffusion."""
+"""Single-GPU trainer for CLaD and observation-only action diffusion."""
 
 from __future__ import annotations
 
@@ -275,7 +275,7 @@ def build_stage2_dataloader(
 
 
 class Stage2Trainer:
-    """Optimize trainable policy parameters while keeping CLaD frozen."""
+    """Optimize a CLaD-conditioned or observation-only diffusion policy."""
 
     def __init__(
         self,
@@ -285,7 +285,7 @@ class Stage2Trainer:
         config: Stage2TrainerConfig,
         device: torch.device | str,
         output_dir: str | Path,
-        foresight_checkpoint: ForesightCheckpointIdentity,
+        foresight_checkpoint: ForesightCheckpointIdentity | None = None,
         metric_callback: Callable[[dict[str, float]], None] | None = None,
     ) -> None:
         self.config = config
@@ -300,6 +300,12 @@ class Stage2Trainer:
             raise ValueError("Dataloader has no complete batches; reduce batch_size or add data")
         self.output_dir = Path(output_dir).expanduser().resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        if self.model.policy_variant == "clad" and foresight_checkpoint is None:
+            raise ValueError("CLaD policy training requires a foresight checkpoint")
+        if self.model.policy_variant == "policy_only" and foresight_checkpoint is not None:
+            raise ValueError("Policy-only training must not use a foresight checkpoint")
+        if self.model.policy_variant not in {"clad", "policy_only"}:
+            raise ValueError(f"Unsupported policy variant: {self.model.policy_variant!r}")
         self.foresight_checkpoint = foresight_checkpoint
         self.metric_callback = metric_callback or self._print_metrics
         self.global_step = 0
@@ -596,7 +602,7 @@ class Stage2Trainer:
             self.dataloader.generator.set_state(state["loader_generator"])
 
     def save_checkpoint(self, path: str | Path | None = None) -> Path:
-        """Atomically save Stage 2 state without duplicating frozen CLaD."""
+        """Atomically save policy state without duplicating frozen CLaD."""
 
         destination = self.checkpoint_path if path is None else Path(path)
         destination = destination.expanduser().resolve()
@@ -616,9 +622,14 @@ class Stage2Trainer:
             "scaler": self.scaler.state_dict(),
             "ema": self.ema.state_dict() if self.ema is not None else None,
             "trainer_config": asdict(self.config),
+            "policy_variant": self.model.policy_variant,
             "policy_config": asdict(self.model.config),
             "conditioner_config": asdict(self.model.conditioner.config),
-            "foresight_checkpoint": asdict(self.foresight_checkpoint),
+            "foresight_checkpoint": (
+                asdict(self.foresight_checkpoint)
+                if self.foresight_checkpoint is not None
+                else None
+            ),
             "latest_metrics": self.latest_metrics,
             "rng_state": self._rng_state(),
             "data_state": self._data_state(),
@@ -642,13 +653,38 @@ class Stage2Trainer:
             )
         if payload.get("trainer_config") != asdict(self.config):
             raise ValueError("Stage 2 trainer config does not match the checkpoint")
+        checkpoint_variant = str(payload.get("policy_variant", "clad"))
+        if checkpoint_variant != self.model.policy_variant:
+            raise ValueError(
+                "Stage 2 policy variant does not match the checkpoint: "
+                f"{self.model.policy_variant!r} != {checkpoint_variant!r}"
+            )
         if payload.get("policy_config") != asdict(self.model.config):
             raise ValueError("Stage 2 policy config does not match the checkpoint")
-        if payload.get("conditioner_config") != asdict(self.model.conditioner.config):
+        stored_conditioner_config = payload.get("conditioner_config")
+        if not isinstance(stored_conditioner_config, Mapping):
+            raise ValueError("Stage 2 checkpoint is missing its conditioner config")
+        conditioner_config_type = type(self.model.conditioner.config)
+        checkpoint_parser = getattr(
+            conditioner_config_type,
+            "from_checkpoint_mapping",
+            conditioner_config_type.from_mapping,
+        )
+        normalized_conditioner_config = asdict(checkpoint_parser(stored_conditioner_config))
+        if normalized_conditioner_config != asdict(self.model.conditioner.config):
             raise ValueError("Stage 2 conditioner config does not match the checkpoint")
-        source_identity = ForesightCheckpointIdentity.from_mapping(payload["foresight_checkpoint"])
-        if not self.foresight_checkpoint.matches(source_identity):
-            raise ValueError("Frozen foresight checkpoint does not match the Stage 2 checkpoint")
+        stored_foresight = payload.get("foresight_checkpoint")
+        if self.model.policy_variant == "clad":
+            if not isinstance(stored_foresight, Mapping):
+                raise ValueError("CLaD checkpoint is missing its frozen foresight identity")
+            source_identity = ForesightCheckpointIdentity.from_mapping(stored_foresight)
+            assert self.foresight_checkpoint is not None
+            if not self.foresight_checkpoint.matches(source_identity):
+                raise ValueError(
+                    "Frozen foresight checkpoint does not match the Stage 2 checkpoint"
+                )
+        elif stored_foresight is not None:
+            raise ValueError("Policy-only checkpoint must not reference frozen foresight")
 
         global_step = int(payload["global_step"])
         attempt_step = int(payload["attempt_step"])

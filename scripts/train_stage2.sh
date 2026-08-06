@@ -2,8 +2,8 @@
 set -euo pipefail
 
 CLAD_PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CLAD_OUTPUT_DIR="$CLAD_PROJECT_DIR/outputs/clad_stage2"
-CLAD_FORESIGHT_CHECKPOINT="$CLAD_PROJECT_DIR/outputs/clad_stage1/stage1_foresight.pt"
+CLAD_OUTPUT_DIR="${CLAD_STAGE2_OUTPUT_DIR:-$CLAD_PROJECT_DIR/outputs/clad_stage2_official}"
+CLAD_FORESIGHT_CHECKPOINT="${CLAD_FORESIGHT_CHECKPOINT:-$CLAD_PROJECT_DIR/outputs/clad_stage1_official/stage1_foresight.pt}"
 : "${LIBERO_DATASET_DIR:?Set LIBERO_DATASET_DIR to the absolute libero_10 directory}"
 
 if [[ ! -f "$CLAD_FORESIGHT_CHECKPOINT" ]]; then

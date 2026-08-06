@@ -1,10 +1,10 @@
 # Dimensions obtained from the selected DecisionNCE checkpoint and LIBERO
-# data interface. The paper does not report Dv, Dl, Dp, or Da. In particular,
-# its prose describes proprioception as joint angles and velocities, whereas
-# this reproduction uses LIBERO's 9D robot_states; see the alignment audit.
+# data interface. The paper does not report Dv, Dl, Dp, or Da. We follow the
+# official LIBERO policy observation fields: 7D joint position plus 2D gripper.
 vision_feature_dim: 1024
 text_feature_dim: 1024
 proprio_dim: 9
+proprioception: libero_joint_gripper
 action_dim: 7
 
 # Paper-reported settings from Section 5.1 and supplementary Section 10.

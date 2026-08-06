@@ -1,0 +1,14 @@
+# Two-view Policy-only experiment. Keep this camera order synchronized with
+# configs/model/policy_only_two_view.yaml and the DecisionNCE cache command.
+dataset_dir: /path/to/libero_datasets/libero_10
+file_pattern: "*_demo.hdf5"
+
+camera_keys:
+  - obs/agentview_rgb
+  - obs/eye_in_hand_rgb
+
+proprioception: libero_joint_gripper
+action_key: actions
+horizon: 6
+include_images: true
+strict: true

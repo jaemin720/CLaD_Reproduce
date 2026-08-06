@@ -40,11 +40,26 @@ def test_libero_proprioception_matches_training_robot_state_layout() -> None:
         "robot0_eef_quat": np.array([1.0, 0.01, 0.02, 0.03]),
     }
 
-    actual = libero_proprioception(observation)
+    actual = libero_proprioception(observation, contract="robot_states")
 
     np.testing.assert_allclose(
         actual,
         [0.03, -0.03, -0.2, 0.1, 1.1, 1.0, 0.01, 0.02, 0.03],
+    )
+    assert actual.dtype == np.float32
+
+
+def test_libero_proprioception_matches_official_joint_gripper_layout() -> None:
+    observation = {
+        "robot0_joint_pos": np.arange(7, dtype=np.float32) + 0.5,
+        "robot0_gripper_qpos": np.array([0.03, -0.03]),
+    }
+
+    actual = libero_proprioception(observation)
+
+    np.testing.assert_allclose(
+        actual,
+        [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 0.03, -0.03],
     )
     assert actual.dtype == np.float32
 
@@ -133,6 +148,23 @@ class _FakeFeatureCache:
         return torch.arange(4.0)
 
 
+class _CapturingAdapter(_FakeAdapter):
+    def __init__(self) -> None:
+        self.images: dict[str, torch.Tensor] = {}
+
+    def encode_views(self, images: Mapping[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        self.images = {name: image.clone() for name, image in images.items()}
+        return super().encode_views(images)
+
+
+class _RerenderedFeatureCache(_FakeFeatureCache):
+    dataset_metadata = {
+        "clad_render_height": 2,
+        "clad_render_width": 3,
+        "clad_image_transform": "rotate_180",
+    }
+
+
 def test_online_encoder_maps_live_camera_and_reuses_cached_text() -> None:
     encoder = OnlineDecisionNCEEncoder(
         adapter=_FakeAdapter(),  # type: ignore[arg-type]
@@ -141,9 +173,8 @@ def test_online_encoder_maps_live_camera_and_reuses_cached_text() -> None:
     )
     observation = {
         "agentview_image": np.full((3, 4, 3), 10, dtype=np.uint8),
+        "robot0_joint_pos": np.arange(7, dtype=np.float32),
         "robot0_gripper_qpos": np.array([0.03, -0.03]),
-        "robot0_eef_pos": np.array([-0.2, 0.1, 1.1]),
-        "robot0_eef_quat": np.array([1.0, 0.01, 0.02, 0.03]),
     }
 
     encoded = encoder.encode_observation(observation)
@@ -167,9 +198,8 @@ def test_online_encoder_batches_live_frames_per_view() -> None:
     observations = [
         {
             "agentview_image": np.full((3, 4, 3), value, dtype=np.uint8),
+            "robot0_joint_pos": np.arange(7, dtype=np.float32),
             "robot0_gripper_qpos": np.array([0.03, -0.03]),
-            "robot0_eef_pos": np.array([-0.2, 0.1, 1.1]),
-            "robot0_eef_quat": np.array([1.0, 0.01, 0.02, 0.03]),
         }
         for value in (10, 20)
     ]
@@ -179,6 +209,29 @@ def test_online_encoder_batches_live_frames_per_view() -> None:
     assert len(encoded) == 2
     torch.testing.assert_close(encoded[0].vision_features["agentview_rgb"], torch.full((4,), 10.0))
     torch.testing.assert_close(encoded[1].vision_features["agentview_rgb"], torch.full((4,), 20.0))
+
+
+def test_online_encoder_replays_cached_image_geometry() -> None:
+    adapter = _CapturingAdapter()
+    encoder = OnlineDecisionNCEEncoder(
+        adapter=adapter,  # type: ignore[arg-type]
+        feature_cache=_RerenderedFeatureCache(),  # type: ignore[arg-type]
+        camera_observation_keys={"agentview_rgb": "agentview_image"},
+    )
+    image = np.arange(2 * 3 * 3, dtype=np.uint8).reshape(2, 3, 3)
+    observation = {
+        "agentview_image": image,
+        "robot0_joint_pos": np.arange(7, dtype=np.float32),
+        "robot0_gripper_qpos": np.array([0.03, -0.03]),
+    }
+
+    encoder.encode_observation(observation)
+
+    np.testing.assert_array_equal(
+        adapter.images["agentview_rgb"][0].numpy(), image[::-1, ::-1]
+    )
+    assert encoder.source_image_size == (2, 3)
+    assert encoder.image_transform == "rotate_180"
 
 
 class _FakeEnvironment:
@@ -255,8 +308,10 @@ def test_rollout_executes_chunks_clips_actions_and_stops_on_success() -> None:
         rollout_id=4,
         init_state_id=1,
         seed=123,
+        environment_seed=0,
         max_steps=10,
         warmup_steps=2,
+        warmup_gripper_action=-1.0,
         action_dim=2,
         clip_actions=True,
     )
@@ -266,7 +321,10 @@ def test_rollout_executes_chunks_clips_actions_and_stops_on_success() -> None:
     assert result.policy_calls == 2
     assert result.inference_seconds == pytest.approx(0.2)
     assert policy.reset_values == ("task_name", "do the task", 123)
+    assert environment.seed_value == 0
     assert len(policy.observed) == 5
+    np.testing.assert_allclose(environment.actions[0], [0.0, -1.0])
+    np.testing.assert_allclose(environment.actions[1], [0.0, -1.0])
     np.testing.assert_allclose(environment.actions[2], [1.0, -1.0])
 
 
@@ -383,8 +441,10 @@ def test_vector_rollout_keeps_episode_state_independent_and_drops_done_slots() -
         rollout_ids=(4, 5),
         init_state_ids=(0, 1),
         seeds=(104, 105),
+        environment_seed=0,
         max_steps=10,
         warmup_steps=1,
+        warmup_gripper_action=-1.0,
         action_dim=2,
         clip_actions=True,
     )
@@ -394,7 +454,10 @@ def test_vector_rollout_keeps_episode_state_independent_and_drops_done_slots() -
     assert [result.policy_calls for result in results] == [1, 2]
     assert [result.inference_seconds for result in results] == pytest.approx([0.2, 0.4])
     assert policy.seeds == (104, 105)
-    assert environment.seed_values == [104, 105]
+    assert environment.seed_values == [0, 0]
+    assert [result.environment_seed for result in results] == [0, 0]
+    np.testing.assert_allclose(environment.actions[0][1], [0.0, -1.0])
+    np.testing.assert_allclose(environment.actions[1][1], [0.0, -1.0])
     assert policy.observed_slots[-1] == (1,)
     assert max(np.abs(action).max() for _, action in environment.actions) <= 1.0
 
@@ -407,6 +470,7 @@ def _result(*, rollout_id: int, success: bool) -> EpisodeResult:
         rollout_id=rollout_id,
         init_state_id=rollout_id,
         seed=rollout_id,
+        environment_seed=0,
         success=success,
         steps=5,
         total_reward=float(success),
@@ -438,9 +502,16 @@ def test_rollout_config_accepts_yaml_lists_and_rejects_invalid_values() -> None:
     config = LiberoRolloutConfig.from_mapping({"task_ids": [1, 2], "execution_steps": 3})
     assert config.task_ids == (1, 2)
     assert config.num_envs == 4
+    assert config.warmup_steps == 10
+    assert config.warmup_gripper_action == -1.0
+    assert config.environment_seed == 0
     with pytest.raises(ValueError, match="positive"):
         LiberoRolloutConfig(max_steps=0)
     with pytest.raises(ValueError, match="num_envs"):
         LiberoRolloutConfig(num_envs=0)
+    with pytest.raises(ValueError, match="warmup_gripper_action"):
+        LiberoRolloutConfig(warmup_gripper_action=-2.0)
+    with pytest.raises(ValueError, match="environment_seed"):
+        LiberoRolloutConfig(environment_seed=-1)
     with pytest.raises(ValueError, match="Unknown"):
         LiberoRolloutConfig.from_mapping({"episodes": 20})

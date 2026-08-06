@@ -24,8 +24,11 @@ from clad.models import (
     CLaDForesightBackbone,
     CLaDStage2Conditioner,
     DiffusionPolicyConfig,
+    PolicyOnlyConditioner,
+    PolicyOnlyConditionerConfig,
     Stage2ConditionerConfig,
 )
+from clad.proprioception import proprioception_spec
 from clad.training import (
     ForesightCheckpointIdentity,
     Stage2MetricLogger,
@@ -61,11 +64,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--foresight-checkpoint",
         type=Path,
-        default=Path("outputs/clad_stage1/stage1_foresight.pt"),
+        default=Path("outputs/clad_stage1_official/stage1_foresight.pt"),
     )
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs/clad_stage2"))
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("outputs/clad_stage2_official"),
+    )
     parser.add_argument("--file-pattern")
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--policy-variant",
+        choices=("clad", "policy_only"),
+        default="clad",
+        help="Use frozen CLaD foresight or the current-observation-only ablation.",
+    )
     parser.add_argument(
         "--frozen-backbone-dtype",
         choices=("auto", "float16", "bfloat16", "float32"),
@@ -151,7 +164,7 @@ def _dataset_config(args: argparse.Namespace) -> LiberoDatasetConfig:
 
 def _model_configs(
     args: argparse.Namespace,
-) -> tuple[Stage2ConditionerConfig, DiffusionPolicyConfig]:
+) -> tuple[Stage2ConditionerConfig | PolicyOnlyConditionerConfig, DiffusionPolicyConfig]:
     values = _load_yaml(args.model_config)
     expected = {"conditioning", "diffusion"}
     if set(values) != expected:
@@ -162,7 +175,10 @@ def _model_configs(
     diffusion_values = values["diffusion"]
     if not isinstance(conditioning_values, Mapping) or not isinstance(diffusion_values, Mapping):
         raise TypeError("conditioning and diffusion configs must be mappings")
-    conditioner_config = Stage2ConditionerConfig.from_mapping(conditioning_values)
+    if args.policy_variant == "clad":
+        conditioner_config = Stage2ConditionerConfig.from_mapping(conditioning_values)
+    else:
+        conditioner_config = PolicyOnlyConditionerConfig.from_mapping(conditioning_values)
     diffusion_config = DiffusionPolicyConfig.from_mapping(diffusion_values)
     if args.down_dims is not None:
         diffusion_config = replace(diffusion_config, down_dims=tuple(args.down_dims))
@@ -191,19 +207,27 @@ def _backbone_dtype(value: str, device: torch.device) -> torch.dtype:
 
 
 def _parameter_counts(model: CLaDDiffusionPolicy) -> dict[str, int]:
+    frozen_clad = 0
+    backbone = getattr(model.conditioner, "backbone", None)
+    if backbone is not None:
+        frozen_clad = sum(parameter.numel() for parameter in backbone.parameters())
     return {
         "parameters_total": sum(parameter.numel() for parameter in model.parameters()),
         "parameters_trainable": sum(
             parameter.numel() for parameter in model.parameters() if parameter.requires_grad
         ),
-        "parameters_frozen_clad": sum(
-            parameter.numel() for parameter in model.conditioner.backbone.parameters()
-        ),
+        "parameters_frozen_clad": frozen_clad,
         "parameters_denoiser": sum(parameter.numel() for parameter in model.denoiser.parameters()),
+        "parameters_conditioner_trainable": sum(
+            parameter.numel()
+            for parameter in model.conditioner.parameters()
+            if parameter.requires_grad
+        ),
+        # Retain the original run-config field for downstream log readers.
         "parameters_conditioning_film": sum(
             parameter.numel()
             for name, parameter in model.conditioner.named_parameters()
-            if parameter.requires_grad and "_film." in name
+            if parameter.requires_grad and "film." in name
         ),
     }
 
@@ -231,6 +255,25 @@ def main() -> None:
         feature_cache=DecisionNCEFeatureCache(args.cache_dir),
         include_future_features=False,
     )
+    if args.policy_variant == "policy_only":
+        assert isinstance(conditioner_config, PolicyOnlyConditionerConfig)
+        if dataset.view_names != conditioner_config.camera_views:
+            raise ValueError(
+                "Policy-only model and dataset camera views must match exactly: "
+                f"model={conditioner_config.camera_views}, dataset={dataset.view_names}"
+            )
+        if dataset_config.proprioception != conditioner_config.proprioception:
+            raise ValueError(
+                "Policy-only model and dataset proprioception contracts must match: "
+                f"model={conditioner_config.proprioception!r}, "
+                f"dataset={dataset_config.proprioception!r}"
+            )
+        proprio_dim = proprioception_spec(dataset_config.proprioception).dimension
+        if proprio_dim != conditioner_config.proprio_dim:
+            raise ValueError(
+                "Policy-only proprioception dimension does not match the model: "
+                f"contract={proprio_dim}, model={conditioner_config.proprio_dim}"
+            )
     metric_logger: Stage2MetricLogger | None = None
     try:
         dataloader = build_stage2_dataloader(
@@ -238,15 +281,31 @@ def main() -> None:
             trainer_config,
             generator=generator,
         )
-        foresight_identity = ForesightCheckpointIdentity.from_path(args.foresight_checkpoint)
-        backbone = CLaDForesightBackbone.from_checkpoint(
-            args.foresight_checkpoint,
-            dtype=_backbone_dtype(args.frozen_backbone_dtype, device),
-        )
-        conditioner = CLaDStage2Conditioner(
-            backbone=backbone,
-            config=conditioner_config,
-        )
+        foresight_identity: ForesightCheckpointIdentity | None = None
+        backbone_dtype: str | None = None
+        if args.policy_variant == "clad":
+            assert isinstance(conditioner_config, Stage2ConditionerConfig)
+            foresight_identity = ForesightCheckpointIdentity.from_path(
+                args.foresight_checkpoint
+            )
+            backbone = CLaDForesightBackbone.from_checkpoint(
+                args.foresight_checkpoint,
+                dtype=_backbone_dtype(args.frozen_backbone_dtype, device),
+            )
+            backbone_dtype = str(next(backbone.parameters()).dtype)
+            if dataset_config.proprioception != backbone.config.inputs.proprioception:
+                raise ValueError(
+                    "CLaD Stage 1 and Stage 2 dataset proprioception contracts must match: "
+                    f"stage1={backbone.config.inputs.proprioception!r}, "
+                    f"dataset={dataset_config.proprioception!r}"
+                )
+            conditioner = CLaDStage2Conditioner(
+                backbone=backbone,
+                config=conditioner_config,
+            )
+        else:
+            assert isinstance(conditioner_config, PolicyOnlyConditionerConfig)
+            conditioner = PolicyOnlyConditioner(conditioner_config)
         model = CLaDDiffusionPolicy(
             conditioner=conditioner,
             config=diffusion_config,
@@ -282,12 +341,15 @@ def main() -> None:
             "action_minimum": action_bounds.minimum.tolist(),
             "action_maximum": action_bounds.maximum.tolist(),
             "device": str(device),
-            "frozen_backbone_dtype": str(next(backbone.parameters()).dtype),
+            "policy_variant": args.policy_variant,
+            "frozen_backbone_dtype": backbone_dtype,
             "dataset_config": asdict(dataset_config),
             "conditioner_config": asdict(conditioner_config),
             "diffusion_config": asdict(diffusion_config),
             "trainer_config": asdict(trainer_config),
-            "foresight_checkpoint": asdict(foresight_identity),
+            "foresight_checkpoint": (
+                asdict(foresight_identity) if foresight_identity is not None else None
+            ),
             "cache_dir": str(args.cache_dir.expanduser().resolve()),
             "output_dir": str(Path(args.output_dir).expanduser().resolve()),
             "resume": str(args.resume.expanduser().resolve()) if args.resume else None,
@@ -297,7 +359,7 @@ def main() -> None:
         effective_batch_size = (
             trainer_config.batch_size * trainer_config.gradient_accumulation_steps
         )
-        print("CLaD Stage 2 diffusion policy training", flush=True)
+        print(f"{args.policy_variant} diffusion policy training", flush=True)
         print(
             f"  device={device} | windows={len(dataset):,} | "
             f"trainable_params={parameter_counts['parameters_trainable']:,}",
@@ -310,9 +372,13 @@ def main() -> None:
             f"effective_batch={effective_batch_size}",
             flush=True,
         )
+        upstream = (
+            f"foresight_sha256={foresight_identity.sha256}"
+            if foresight_identity is not None
+            else "foresight=disabled"
+        )
         print(
-            f"  action_samples={action_bounds.count:,} | "
-            f"foresight_sha256={foresight_identity.sha256}",
+            f"  action_samples={action_bounds.count:,} | {upstream}",
             flush=True,
         )
         print(f"  metrics={metric_logger.metrics_path}", flush=True)

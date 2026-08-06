@@ -48,6 +48,14 @@ def _create_task_file(root: Path) -> None:
             data=np.stack((steps, steps + 1.0, steps + 2.0), axis=-1),
         )
         observations = demo.create_group("obs")
+        observations.create_dataset(
+            "joint_states",
+            data=np.stack([steps + offset for offset in range(7)], axis=-1),
+        )
+        observations.create_dataset(
+            "gripper_states",
+            data=np.stack((steps + 7.0, steps + 8.0), axis=-1),
+        )
         agent = np.zeros((5, 4, 4, 3), dtype=np.uint8)
         wrist = np.zeros((5, 3, 3, 3), dtype=np.uint8)
         for step in range(5):
@@ -111,7 +119,7 @@ def _model_config() -> CLaDStage1Config:
         inputs=CLaDInputEncoderConfig(
             vision_feature_dim=4,
             text_feature_dim=4,
-            proprio_dim=3,
+            proprio_dim=9,
             action_dim=2,
             hidden_dim=12,
             tokenizer_mlp_hidden_dim=16,
@@ -129,7 +137,7 @@ def _model_config() -> CLaDStage1Config:
             hidden_dim=12,
             predictor_hidden_dim=16,
             decoder_hidden_dim=16,
-            proprio_dim=3,
+            proprio_dim=9,
             semantic_visual_dim=4,
         ),
     )
@@ -201,7 +209,7 @@ def test_cached_batch_runs_composed_stage1_and_updates_ema(tmp_path: Path) -> No
         assert output.dynamics.z_dyn.shape == (2, 12)
         assert output.foresight.combined.shape == (2, 24)
         assert output.targets.proprio.shape == (2, 12)
-        assert output.reconstructions.proprio.shape == (2, 3)
+        assert output.reconstructions.proprio.shape == (2, 9)
         assert output.reconstructions.semantic_visual.shape == (2, 4)
         assert torch.equal(output.actions.mask, action_mask)
         assert output.dynamics.asymmetric_attention_weights[0].shape == (

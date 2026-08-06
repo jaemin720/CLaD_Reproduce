@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,6 +18,7 @@ from clad.models import (
     CrossAttentionConfig,
     ForesightConfig,
 )
+from clad.proprioception import LEGACY_ROBOT_STATE, LIBERO_JOINT_GRIPPER
 from clad.training import Stage1Trainer, Stage1TrainerConfig, build_stage1_dataloader
 
 
@@ -210,12 +211,22 @@ def test_stage1_yaml_configs_construct_runtime_objects() -> None:
     trainer_config = Stage1TrainerConfig.from_mapping(trainer_values)
 
     assert model_config.inputs.hidden_dim == 1024
+    assert model_config.inputs.proprioception == LIBERO_JOINT_GRIPPER
     assert model_config.attention.num_layers == 8
     assert model_config.foresight.ema_momentum == pytest.approx(0.995)
     assert trainer_config.max_steps == 25_000
     assert trainer_config.batch_size == 128
     assert trainer_config.amp_init_scale == pytest.approx(2_048.0)
     assert trainer_config.max_consecutive_optimizer_skips == 16
+
+
+def test_historical_stage1_checkpoint_config_keeps_legacy_state_layout() -> None:
+    values = asdict(_model_config())
+    values["inputs"].pop("proprioception")
+
+    restored = CLaDStage1Config.from_checkpoint_mapping(values)
+
+    assert restored.inputs.proprioception == LEGACY_ROBOT_STATE
 
 
 def test_trainer_config_rejects_invalid_warmup() -> None:

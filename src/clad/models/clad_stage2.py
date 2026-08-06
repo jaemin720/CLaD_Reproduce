@@ -26,6 +26,7 @@ from clad.models.clad_foresight import (
 )
 from clad.models.clad_inputs import (
     ActionTokenOutput,
+    CLaDInputEncoderConfig,
     CLaDInputEncoders,
     VisionFeatures,
 )
@@ -388,13 +389,18 @@ class LatentFiLM(nn.Module):
 
 @dataclass(frozen=True, slots=True)
 class Stage2ConditioningOutput:
-    """Equation (21) outputs supplied to the diffusion policy."""
+    """Two modality conditions supplied to the diffusion policy.
+
+    ``foresight`` is present for CLaD and absent for observation-only
+    baselines. One output contract lets both variants share the denoiser,
+    loss, sampler, trainer, and online rollout path.
+    """
 
     proprio: torch.Tensor
     semantic: torch.Tensor
     proprio_observation: torch.Tensor
     semantic_observation: torch.Tensor
-    foresight: LatentForesight
+    foresight: LatentForesight | None
 
     @property
     def combined(self) -> torch.Tensor:
@@ -424,6 +430,16 @@ class CLaDStage2Conditioner(nn.Module):
             condition_dim=hidden_dim,
             dropout=self.config.film_dropout,
         )
+
+    @property
+    def policy_variant(self) -> str:
+        return "clad"
+
+    @property
+    def input_config(self) -> CLaDInputEncoderConfig:
+        """Dimensions shared with the downstream diffusion policy."""
+
+        return self.backbone.config.inputs
 
     @staticmethod
     def _pool(tokens: torch.Tensor) -> torch.Tensor:

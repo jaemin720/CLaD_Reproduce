@@ -5,7 +5,8 @@ Dynamics**, arXiv:2603.29409v1 (2026-03-31)을 기준으로 현재 기본 구현
 대조한 결과다. 검토 기준은 논문 본문 식 (5)--(22), Section 5.1, supplementary
 Sections 8--10이다.
 
-- 감사일: 2026-08-03
+- 최초 감사일: 2026-08-03
+- proprioception 재감사: 2026-08-04
 - 코드 기준점: `9ec0ee3` (`docs: clarify camera-view reproduction assumption`)
 - 논문 원문: <https://arxiv.org/abs/2603.29409>
 - 구현 가정 상세: [`reproduction_assumptions.md`](reproduction_assumptions.md)
@@ -44,18 +45,23 @@ Sections 8--10이다.
 
 ## 2. 확인된 미해결 차이
 
-### 2.1 Proprioception은 논문 문장과 문자 그대로 같지 않다
+### 2.1 Proprioception은 공식 LIBERO 관례로 변경했지만 논문과는 미확정이다
 
-논문은 `p_t`가 joint angles와 velocities를 포함한다고 서술한다. 현재 구현은
-공식 LIBERO HDF5의 9D `robot_states`, 즉 gripper qpos 2D, EEF position 3D,
-EEF quaternion 4D를 사용한다. full arm joint velocity는 포함하지 않는다.
+신규 학습은 공식 LIBERO imitation-policy observation 순서인
+`obs/joint_states` 7D와 `obs/gripper_states` 2D를 사용한다. online rollout도
+`robot0_joint_pos` 뒤에 `robot0_gripper_qpos`를 연결한다. offline/live field,
+순서와 각 component 차원은 하나의 named contract로 검증한다.
 
-이 차이는 숨기지 않고 `configs/model/clad_stage1.yaml`과
-[`reproduction_assumptions.md`](reproduction_assumptions.md)에 표시했다. 그러나
-논문에는 `Dp`, field 순서, velocity 정의, 좌표계가 없어 안전한 대체 tensor를
-구성할 수 없다. 이미 생성한 Stage 1/2 checkpoint의 입력 shape도 바뀌므로 이번
-감사에서 모델 코드는 변경하지 않았다. 저자 정보가 생기면 가장 먼저 확인해야
-할 항목이다.
+다만 논문은 `p_t`가 joint angles와 velocities를 포함한다고 서술한다. 현재 9D에는
+joint velocity가 없으므로 논문 문장과 문자 그대로 같다고 할 수 없다. 논문에는
+`Dp`, field 순서, velocity 정의와 좌표계가 없어 이 부분은 계속 미해결 차이로
+남긴다.
+
+이전 checkpoint는 같은 9D width지만 `gripper qpos + EEF position + EEF
+quaternion`이라는 전혀 다른 의미를 가진다. 입력 계약 필드가 없는 checkpoint는
+레거시 `robot_states`로 복원하고, 신규 공식 data로의 resume은 거부한다. 따라서
+과거 결과를 보존하면서도 새 기본 학습이 잘못된 의미로 checkpoint를 재사용하지
+않는다. image/text-only DecisionNCE cache는 재생성할 필요가 없다.
 
 ### 2.2 논문이 공개하지 않은 고영향 선택
 
@@ -79,7 +85,10 @@ EEF quaternion 4D를 사용한다. full arm joint velocity는 포함하지 않�
 ## 3. 아직 재현하지 않은 논문 결과
 
 - top-3 checkpoint 자동 보존, validation, 선정 및 집계;
-- proprio-only, semantic-only, policy-only modality ablation;
+- proprio-only and semantic-only modality ablations;
+- Policy-only 200K checkpoint has been produced under the historical
+  `robot_states` contract, but its complete 10-task × 50-rollout result has not
+  been established. The official joint+gripper run requires separate retraining;
 - reconstruction-loss 제거와 attention 방향 ablation;
 - action-free, heavy-mask, curriculum ablation;
 - LIBERO-Spatial, Object, Goal 학습 및 50-rollout 평가;
@@ -95,19 +104,21 @@ EEF quaternion 4D를 사용한다. full arm joint velocity는 포함하지 않�
 | 파일 | 변경 |
 | --- | --- |
 | `README.md` | 정합성 감사 문서 링크 추가 |
-| `configs/data/libero_long.yaml` | 9D `robot_states`와 논문 proprio 서술의 차이 표시 |
-| `configs/model/clad_stage1.yaml` | 논문 명시값과 data/upstream 유래 dimension 주석 분리, proprio 차이 표시 |
+| `configs/data/libero_long.yaml` | 공식 `joint_states + gripper_states` 계약을 기본값으로 지정 |
+| `configs/model/clad_stage1.yaml` | 신규 Stage 1의 named proprioception 계약 기록 |
 | `configs/eval/libero_long.yaml` | 논문의 50 rollouts와 LIBERO/재현 평가 선택 분리 |
-| `docs/reproduction_assumptions.md` | proprioception을 미해결 차이로 명시 |
+| `docs/reproduction_assumptions.md` | 공식 LIBERO 선택, 논문과의 잔여 차이 및 migration 기록 |
 | `docs/libero_evaluation.md` | 600 steps, 128x128, fixed-state/seed가 논문 명시값이 아님을 명확화 |
 | `docs/stage2_conditioning.md` | 이미 구현된 downstream trainer/evaluator 상태 반영 |
 | `docs/stage2_diffusion.md` | 완료된 full-width GPU smoke 상태 반영 |
 | `docs/stage2_training.md` | 구현 및 smoke 완료 상태 반영, 평가 문서 연결 |
 | `docs/implementation_plan.md` | 오래된 “다음 trainer 단계” 제거, LIBERO 관행과 논문 protocol 분리 |
 | `docs/paper_alignment_audit.md` | 본 감사표, 미해결 차이, 미구현 범위와 변경 기록 추가 |
-| `tests/test_paper_alignment.py` | 논문이 직접 제시한 기본 수치의 regression test 추가 |
+| `src/clad/proprioception.py` | offline/live field와 순서를 공유하는 named contract 추가 |
+| `tests/test_paper_alignment.py` | 논문 기본 수치와 공식 LIBERO state 계약 regression test 추가 |
 
-모델 수학이나 기존 checkpoint contract는 이번 감사에서 변경하지 않았다.
+모델 수학과 tensor width는 바꾸지 않았다. 신규 checkpoint의 tensor 의미는 공식
+LIBERO state로 변경했으며, 기존 checkpoint의 의미는 migration path로 보존했다.
 
 ## 5. 후속 확인 순서
 

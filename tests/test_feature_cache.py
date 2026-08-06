@@ -127,3 +127,28 @@ def test_cache_reader_returns_features_and_reopens_after_pickle(tmp_path: Path) 
     finally:
         cache.close()
 
+
+def test_cache_propagates_common_rerender_metadata(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    cache_dir = tmp_path / "cache"
+    dataset_dir.mkdir()
+    task_path = _create_task_file(dataset_dir)
+    with h5py.File(task_path, "r+") as handle:
+        data = handle["data"]
+        data.attrs["clad_rerender_schema_version"] = 1
+        data.attrs["clad_render_height"] = 256
+        data.attrs["clad_render_width"] = 256
+        data.attrs["clad_image_transform"] = "rotate_180"
+        data.attrs["clad_filter_noops"] = True
+        data.attrs["clad_noop_threshold"] = 1e-4
+        data.attrs["clad_settle_steps"] = 10
+        data.attrs["clad_keep_only_successes"] = True
+
+    _builder().build(dataset_dir=dataset_dir, cache_dir=cache_dir)
+    cache = DecisionNCEFeatureCache(cache_dir)
+    try:
+        assert cache.dataset_metadata["clad_render_height"] == 256
+        assert cache.dataset_metadata["clad_render_width"] == 256
+        assert cache.dataset_metadata["clad_image_transform"] == "rotate_180"
+    finally:
+        cache.close()

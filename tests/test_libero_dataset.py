@@ -16,8 +16,19 @@ def _create_demo(data_group: h5py.Group, demo_index: int, length: int) -> None:
     steps = np.arange(length, dtype=np.float32) + offset
 
     demo.create_dataset("actions", data=np.stack([steps, -steps], axis=-1))
-    demo.create_dataset("robot_states", data=np.stack([steps, steps + 0.5], axis=-1))
+    demo.create_dataset(
+        "robot_states",
+        data=np.stack([steps + offset for offset in range(9)], axis=-1),
+    )
     obs = demo.create_group("obs")
+    obs.create_dataset(
+        "joint_states",
+        data=np.stack([steps + offset for offset in range(7)], axis=-1),
+    )
+    obs.create_dataset(
+        "gripper_states",
+        data=np.stack([steps + 100.0, steps + 101.0], axis=-1),
+    )
     images = np.zeros((length, 4, 5, 3), dtype=np.uint8)
     images[:, 0, 0, 0] = np.arange(length, dtype=np.uint8)
     obs.create_dataset("agentview_rgb", data=images)
@@ -64,9 +75,18 @@ def test_dataset_builds_episode_safe_windows(tmp_path: Path) -> None:
         first = dataset[0]
         assert first["episode_id"] == "demo_0"
         assert first["anchor_step"] == 2
-        torch.testing.assert_close(first["proprio_prev"], torch.tensor([0.0, 0.5]))
-        torch.testing.assert_close(first["proprio_now"], torch.tensor([2.0, 2.5]))
-        torch.testing.assert_close(first["proprio_future"], torch.tensor([4.0, 4.5]))
+        torch.testing.assert_close(
+            first["proprio_prev"],
+            torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 100.0, 101.0]),
+        )
+        torch.testing.assert_close(
+            first["proprio_now"],
+            torch.tensor([2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 102.0, 103.0]),
+        )
+        torch.testing.assert_close(
+            first["proprio_future"],
+            torch.tensor([4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 104.0, 105.0]),
+        )
         torch.testing.assert_close(
             first["past_actions"],
             torch.tensor([[0.0, 0.0], [1.0, -1.0]]),
@@ -134,6 +154,23 @@ def test_camera_keys_accept_yaml_style_lists(tmp_path: Path) -> None:
     )
 
     assert config.camera_keys == ("obs/agentview_rgb",)
+
+
+def test_legacy_robot_states_remains_an_explicit_option(tmp_path: Path) -> None:
+    _create_task_file(tmp_path)
+    dataset = LiberoWindowDataset(
+        LiberoDatasetConfig(
+            dataset_dir=tmp_path,
+            horizon=2,
+            proprio_key="robot_states",
+        )
+    )
+
+    try:
+        assert dataset.config.proprioception == "robot_states"
+        torch.testing.assert_close(dataset[0]["proprio_now"], torch.arange(2.0, 11.0))
+    finally:
+        dataset.close()
 
 
 def test_open_dataset_can_be_pickled_for_dataloader_workers(tmp_path: Path) -> None:

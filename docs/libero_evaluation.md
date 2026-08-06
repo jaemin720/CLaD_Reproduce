@@ -12,9 +12,12 @@
 - 학습 cache manifest와 로컬 DecisionNCE checkpoint SHA-256을 대조하고,
   task text feature는 cache에 저장된 값을 그대로 사용한다.
 - 환경의 live RGB frame만 DecisionNCE로 encode한다.
-- 학습 데이터의 9D `robot_states`와 동일하게
-  `gripper qpos(2) + EEF position(3) + EEF quaternion(4)`를 구성한다.
-- 초기 history는 최초 관측 반복과 zero action으로 왼쪽 padding한다.
+- 신규 학습 데이터와 동일하게 `robot0_joint_pos(7) +
+  robot0_gripper_qpos(2)`를 구성한다. 입력 계약은 checkpoint에 기록되며, 필드가
+  없는 기존 checkpoint만 `gripper qpos(2) + EEF position(3) + EEF
+  quaternion(4)`의 레거시 `robot_states` 순서로 자동 복원한다.
+- 초기 history는 최초 관측 반복과 zero action으로 왼쪽 padding한 뒤, simulator
+  warm-up에서 실제 실행한 open-gripper action을 순서대로 반영한다.
 - 6-action DDPM chunk를 생성하고 configurable한 개수만큼 실행한 뒤
   다시 계획한다.
 - 동일 task의 rollout을 subprocess LIBERO vector environment로 병렬 실행하고,
@@ -28,9 +31,21 @@
 기본 설정은 [`configs/eval/libero_long.yaml`](../configs/eval/libero_long.yaml)에
 있다. 논문의 single-checkpoint 표기(`‡`)에서 직접 확인되는 값은 task당
 50 rollout이다. 최대 600 policy step과 128x128 agent view는 논문에 적혀 있지
-않은 이 재현의 기본값이다. fixed initial state와 초기 5회의 zero action은
-공식 LIBERO benchmark API 및 평가 관행을 따른다. initial-state 순서와 seed도
-논문이 공개한 설정은 아니다.
+않은 이 재현의 기본값이다. native-256/OpenVLA-style 재생성 데이터와 맞추기
+위해 초기 10회는 `[0, 0, 0, 0, 0, 0, -1]`을 실행한다. 설치된 Panda gripper의
+규약에서 `-1`은 open이고 `+1`은 close다. initial-state 순서, simulator seed,
+warm-up 및 episode horizon은 논문이 공개한 설정이 아니다.
+
+simulator seed와 diffusion sampling seed는 분리한다. 모든 environment episode는
+재생성 데이터와 같은 `environment_seed=0`으로 초기화하고, policy DDPM만
+`seed + task_id*100000 + rollout_id`를 사용한다. 두 값은 모두
+`run_identity.json`에 포함되며 CLI의 `--environment-seed`, `--seed`,
+`--warmup-steps`, `--warmup-gripper-action`으로 명시적으로 변경할 수 있다.
+
+shell launcher의 신규 기본 artifact 경로는 `outputs/clad_stage2_official`과
+`outputs/clad_stage1_official`이다. 이전 결과를 재평가하려면 두 경로를 환경
+변수로 명시한다. evaluator는 checkpoint의 proprioception 계약을 읽으므로 이
+경우에도 옛 `robot_states` 입력이 자동으로 유지된다.
 
 논문은 6개 action을 생성한다고 설명하지만 몇 개를 실행한 뒤 다시
 계획하는지는 밝히지 않는다. 이 구현은 기본적으로 6개 전체를 실행한다.
@@ -42,7 +57,7 @@ LIBERO 공식 lifelong evaluator와 같은 `SubprocVectorEnv` 계열 구조를 �
 환경 dynamics, fixed state, 성공 판정 횟수는 바꾸지 않으며 다음 항목을
 rollout별로 독립 유지한다.
 
-- episode seed와 fixed initial-state ID;
+- 고정 environment seed, episode별 policy seed와 fixed initial-state ID;
 - action/observation history;
 - diffusion initial noise 및 각 reverse-step noise stream;
 - success, termination, step count, video와 결과 record.
@@ -119,8 +134,8 @@ import하기 전에 명확한 오류를 낸다. 다른 위치는 `--libero-confi
 
 ```bash
 python scripts/evaluate_clad_libero.py \
-  --checkpoint outputs/clad_stage2/stage2_latest.pt \
-  --foresight-checkpoint outputs/clad_stage1/stage1_foresight.pt \
+  --checkpoint outputs/clad_stage2_official/stage2_latest.pt \
+  --foresight-checkpoint outputs/clad_stage1_official/stage1_foresight.pt \
   --device cuda \
   --checkpoint-only
 ```
@@ -141,7 +156,7 @@ python scripts/evaluate_clad_libero.py \
 launcher는 `CUDA_VISIBLE_DEVICES=1`로 해당 GPU만 노출하고 Python 평가
 프로세스에는 `--device cuda:0`을 전달한다. 따라서 첫 번째 인자가 1이어도
 PyTorch 내부 장치 번호가 `cuda:0`으로 출력되는 것이 정상이다. 콘솔 출력은
-`outputs/clad_evaluation/eval_console.log`에도 누적된다.
+`outputs/clad_evaluation_official/eval_console.log`에도 누적된다.
 
 기본적으로 동일 task의 rollout 4개를 한 wave로 실행한다. 환경은 CPU
 subprocess/EGL context를 하나씩 소유하지만 DecisionNCE와 CLaD policy는 부모
@@ -185,7 +200,8 @@ CLAD_EVAL_OUTPUT_DIR=outputs/clad_evaluation_vector_smoke \
 - DecisionNCE checkpoint가 학습 cache manifest와 일치하는가;
 - observation key 및 9D proprioception 오류가 없는가;
 - sampled action에 NaN/Inf가 없는가;
-- 서로 다른 rollout seed 두 개가 출력되는가;
+- environment seed는 두 episode 모두 0이고 policy seed는 서로 다른가;
+- 첫 10개 warm-up action의 마지막 차원이 `-1`인가;
 - 30 step 이내 성공 여부와 관계없이 episode record 두 개가 저장되는가.
 
 동일한 환경/정책 경로를 batch 1로 확인할 때는 별도 directory에서 다음처럼
@@ -224,7 +240,7 @@ CLAD_EVAL_OUTPUT_DIR=outputs/clad_evaluation_serial_smoke \
 출력은 다음과 같다.
 
 ```text
-outputs/clad_evaluation/
+outputs/clad_evaluation_official/
 ├── run_identity.json       # checkpoint/cache hashes and resolved protocol
 ├── episode_results.jsonl   # crash-safe per-episode records
 ├── summary.json            # task SR and macro average SR

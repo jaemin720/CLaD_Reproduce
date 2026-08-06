@@ -15,12 +15,14 @@ import torch
 from clad.data import DecisionNCEFeatureCache
 from clad.data.camera import camera_view_name
 from clad.data.feature_cache import sha256_file
+from clad.data.image_transform import IMAGE_TRANSFORMS, transform_rgb_image
 from clad.models import (
     CLaDDiffusionPolicy,
     CLaDHistoryBatch,
     DecisionNCEAdapter,
     DecisionNCEAdapterConfig,
 )
+from clad.proprioception import LIBERO_JOINT_GRIPPER, proprioception_spec
 
 DEFAULT_CAMERA_OBSERVATION_KEYS = {
     "agentview_rgb": "agentview_image",
@@ -28,23 +30,29 @@ DEFAULT_CAMERA_OBSERVATION_KEYS = {
 }
 
 
-def libero_proprioception(observation: Mapping[str, Any]) -> np.ndarray:
-    """Recreate the 9D ``robot_states`` used in the LIBERO HDF5 files."""
+def libero_proprioception(
+    observation: Mapping[str, Any],
+    *,
+    contract: str = LIBERO_JOINT_GRIPPER,
+) -> np.ndarray:
+    """Build the exact named 9D training state from a live observation."""
 
-    fields = (
-        "robot0_gripper_qpos",
-        "robot0_eef_pos",
-        "robot0_eef_quat",
-    )
-    missing = [name for name in fields if name not in observation]
+    spec = proprioception_spec(contract)
+    missing = [name for name in spec.observation_keys if name not in observation]
     if missing:
-        raise KeyError(f"LIBERO observation is missing proprioception fields: {missing}")
-    components = [np.asarray(observation[name], dtype=np.float32).reshape(-1) for name in fields]
-    expected_sizes = (2, 3, 4)
+        raise KeyError(
+            f"LIBERO observation is missing {contract!r} proprioception fields: {missing}"
+        )
+    components = [
+        np.asarray(observation[name], dtype=np.float32).reshape(-1)
+        for name in spec.observation_keys
+    ]
+    expected_sizes = spec.observation_component_dims
     actual_sizes = tuple(component.size for component in components)
     if actual_sizes != expected_sizes:
         raise ValueError(
-            f"LIBERO proprioception components must have sizes (2, 3, 4), got {actual_sizes}"
+            f"LIBERO {contract!r} proprioception components must have sizes "
+            f"{expected_sizes}, got {actual_sizes}"
         )
     proprioception = np.concatenate(components)
     if not np.isfinite(proprioception).all():
@@ -69,10 +77,13 @@ class OnlineDecisionNCEEncoder:
         adapter: DecisionNCEAdapter,
         feature_cache: DecisionNCEFeatureCache,
         camera_observation_keys: Mapping[str, str],
+        proprioception: str = LIBERO_JOINT_GRIPPER,
     ) -> None:
         self.adapter = adapter
         self.feature_cache = feature_cache
         self.camera_observation_keys = dict(camera_observation_keys)
+        proprioception_spec(proprioception)
+        self.proprioception = proprioception
         expected_views = tuple(camera_view_name(key) for key in feature_cache.camera_keys)
         if set(self.camera_observation_keys) != set(expected_views):
             raise ValueError(
@@ -82,6 +93,24 @@ class OnlineDecisionNCEEncoder:
             )
         if any(not key for key in self.camera_observation_keys.values()):
             raise ValueError("Live camera observation keys cannot be empty")
+        dataset_metadata = getattr(feature_cache, "dataset_metadata", {})
+        self.image_transform = str(
+            dataset_metadata.get("clad_image_transform", "none")
+        )
+        if self.image_transform not in IMAGE_TRANSFORMS:
+            raise ValueError(
+                "Feature cache contains an unsupported image transform: "
+                f"{self.image_transform!r}"
+            )
+        height = dataset_metadata.get("clad_render_height")
+        width = dataset_metadata.get("clad_render_width")
+        if (height is None) != (width is None):
+            raise ValueError(
+                "Feature cache must specify both render height and render width"
+            )
+        self.source_image_size = (
+            (int(height), int(width)) if height is not None else None
+        )
         self._task_instructions = {
             str(entry["task_id"]): str(entry["source"]["instruction"])
             for entry in feature_cache.manifest["tasks"]
@@ -94,6 +123,7 @@ class OnlineDecisionNCEEncoder:
         *,
         device: str = "auto",
         camera_observation_keys: Mapping[str, str] | None = None,
+        proprioception: str = LIBERO_JOINT_GRIPPER,
         verify_checkpoint: bool = True,
     ) -> OnlineDecisionNCEEncoder:
         cache = DecisionNCEFeatureCache(cache_dir)
@@ -142,6 +172,7 @@ class OnlineDecisionNCEEncoder:
                 adapter=adapter,
                 feature_cache=cache,
                 camera_observation_keys=camera_observation_keys,
+                proprioception=proprioception,
             )
         except BaseException:
             cache.close()
@@ -189,11 +220,20 @@ class OnlineDecisionNCEEncoder:
                     raise ValueError(
                         f"Camera {observation_key!r} must have shape [H,W,3], got {image.shape}"
                     )
-                view_images.append(torch.from_numpy(np.ascontiguousarray(image, dtype=np.uint8)))
+                transformed = transform_rgb_image(
+                    np.asarray(image, dtype=np.uint8),
+                    self.image_transform,
+                )
+                view_images.append(torch.from_numpy(transformed))
             images[view_name] = torch.stack(view_images)
         encoded_views = self.adapter.encode_views(images)
         proprioception = torch.from_numpy(
-            np.stack([libero_proprioception(value) for value in observation_batch])
+            np.stack(
+                [
+                    libero_proprioception(value, contract=self.proprioception)
+                    for value in observation_batch
+                ]
+            )
         ).to(self.device)
         return [
             EncodedObservation(
@@ -316,6 +356,21 @@ class CLaDOnlinePolicy:
         if encoder.device != self.device:
             raise ValueError(
                 f"DecisionNCE and policy must share a device: {encoder.device} != {self.device}"
+            )
+        expected_views = getattr(model.conditioner.input_config, "camera_views", None)
+        if expected_views is not None:
+            actual_views = tuple(encoder.camera_observation_keys)
+            if actual_views != tuple(expected_views):
+                raise ValueError(
+                    "Policy and live DecisionNCE camera views must match exactly: "
+                    f"policy={tuple(expected_views)}, encoder={actual_views}"
+                )
+        expected_proprioception = model.conditioner.input_config.proprioception
+        if encoder.proprioception != expected_proprioception:
+            raise ValueError(
+                "Policy and live proprioception contracts must match exactly: "
+                f"policy={expected_proprioception!r}, "
+                f"encoder={encoder.proprioception!r}"
             )
         self.execution_steps = execution_steps
         self.amp_enabled = amp_enabled and self.device.type == "cuda"

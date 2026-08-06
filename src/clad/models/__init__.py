@@ -69,6 +69,11 @@ from clad.models.decisionnce_adapter import (
     DecisionNCEAdapter,
     DecisionNCEAdapterConfig,
 )
+from clad.models.policy_only import (
+    ObservationMLP,
+    PolicyOnlyConditioner,
+    PolicyOnlyConditionerConfig,
+)
 
 __all__ = [
     "ActionSequenceEncoder",
@@ -118,6 +123,9 @@ __all__ = [
     "LinearActionNormalizer",
     "MLPTokenizer",
     "ModalityTransitionEncoder",
+    "ObservationMLP",
+    "PolicyOnlyConditioner",
+    "PolicyOnlyConditionerConfig",
     "ProprioStateEncoder",
     "SemanticStateEncoder",
     "SinusoidalTimestepEmbedding",

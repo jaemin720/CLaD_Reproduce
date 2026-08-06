@@ -11,6 +11,7 @@ from typing import Any
 import torch
 
 from clad.data import LiberoDatasetConfig, LiberoWindowDataset
+from clad.proprioception import LIBERO_JOINT_GRIPPER, PROPRIOCEPTION_SPECS
 
 
 def _shape(value: Any) -> str:
@@ -41,7 +42,11 @@ def parse_args() -> argparse.Namespace:
             "Defaults to obs/agentview_rgb."
         ),
     )
-    parser.add_argument("--proprio-key", default="robot_states")
+    parser.add_argument(
+        "--proprioception",
+        choices=tuple(PROPRIOCEPTION_SPECS),
+        default=LIBERO_JOINT_GRIPPER,
+    )
     parser.add_argument("--no-images", action="store_true")
     return parser.parse_args()
 
@@ -54,7 +59,7 @@ def main() -> None:
             dataset_dir=args.dataset_dir,
             horizon=args.horizon,
             camera_keys=camera_keys,
-            proprio_key=args.proprio_key,
+            proprioception=args.proprioception,
             include_images=not args.no_images,
         )
     )

@@ -67,16 +67,22 @@ step으로 센다. 논문의 시간과 GPU 수치는 저자 환경의 보고값�
 
 - **논문 명시**: `p_t`를 joint angle과 velocity를 포함하는 proprioceptive
   state로 서술하지만 정확한 `Dp`와 LIBERO field 조합은 제시하지 않는다.
-- **현재 선택**: demonstration의 `robot_states` 9차원 vector를 사용한다.
-  online rollout에서는 `gripper qpos(2) + EEF position(3) + EEF
-  quaternion(4)`을 연결해 같은 9차원을 복원한다.
-- **정합성 상태**: **미해결 차이**다. 현재 9차원 값에는 논문 문장의 full arm
-  joint velocity가 포함되지 않으므로 그 서술과 문자 그대로 같지 않다. 다만
-  논문은 `Dp`, 정확한 field, 좌표계와 전처리를 공개하지 않았고 현재 HDF5의
-  `robot_states` contract는 online에서 정확히 재구성 가능하므로, 추측으로
-  입력 schema와 이미 학습된 checkpoint를 바꾸지 않는다.
-- **중요성**: 현재 state는 full arm joint angle/velocity vector가 아니다.
-  저자 구현이 다른 proprio schema를 사용했다면 직접적인 재현 차이다.
+- **현재 선택**: 공식 LIBERO policy observation 순서에 맞춰 HDF5의
+  `obs/joint_states` 7차원 뒤에 `obs/gripper_states` 2차원을 연결한다. online
+  rollout에서는 같은 순서로 `robot0_joint_pos`와 `robot0_gripper_qpos`를
+  연결한다. 이름은 `libero_joint_gripper`이며 총 차원은 9다.
+- **변경 이유**: 이전 선택인 `robot_states = gripper qpos(2) + EEF
+  position(3) + EEF quaternion(4)`는 online/offline에서는 일관됐지만 공식
+  LIBERO imitation-policy 입력과 달랐다. 재현 baseline은 공식 dataset field를
+  우선하는 편이 더 검증 가능하므로 2026-08-04부터 기본 계약을 변경했다.
+- **레거시 호환성**: 이 필드가 없는 기존 Stage 1/Policy-only checkpoint는
+  자동으로 `robot_states`로 해석한다. 같은 9차원이라도 의미와 순서가 다르므로
+  새 dataset으로 resume하는 것은 거부하며, 새 계약의 성능은 재학습해야 한다.
+- **정합성 상태**: 공식 LIBERO 관례에는 가까워졌지만 **논문과의 완전 일치는
+  여전히 미해결**이다. 선택한 9차원에는 논문 문장의 joint velocity가 없으며,
+  논문은 `Dp`, field 순서, velocity 정의와 좌표계를 공개하지 않았다.
+- **cache 영향**: DecisionNCE cache에는 image/text feature만 있으므로 이 변경만
+  위해 cache를 다시 만들 필요는 없다.
 
 ### A03. action 정의
 
@@ -329,16 +335,21 @@ Stage 2 checkpoint는 이 artifact를 내장하지 않고 size와 SHA-256으로 
 
 - LIBERO benchmark가 제공하는 fixed initial state를 순서대로 사용하고, rollout
   수가 더 많으면 modulo로 순환한다.
-- episode seed는 `42 + task_id*100000 + rollout_id`다.
+- simulator seed는 native-256/OpenVLA-style 재생성 데이터와 동일하게 모든
+  episode에서 `0`으로 고정한다. fixed state를 적용하더라도 simulator seed가
+  물체 배치에 영향을 줄 수 있어 policy 난수와 분리한 것이다.
+- DDPM policy seed만 `42 + task_id*100000 + rollout_id`를 사용한다.
 - paper는 이 state 선택 순서와 seed 공식을 명시하지 않는다.
 
 ### E03. warmup과 online history
 
-- environment reset 및 fixed state 적용 후 zero action 5회를 실행한다.
+- environment reset 및 fixed state 적용 후 native-256 데이터 재생성과 같은
+  `[0, 0, 0, 0, 0, 0, -1]` action을 10회 실행한다. Panda gripper에서 `-1`은
+  open이며, gripper `0`은 현재 finger pose를 고정하는 명령이 아니다.
 - episode 시작 history는 initial observation 반복과 zero action으로 왼쪽
-  padding하고, warmup 중 실제 observation을 계속 반영한다.
-- paper에는 warmup/history padding이 없으며 standard LIBERO 관행과 online
-  tensor contract를 맞추기 위한 선택이다.
+  padding하고, warmup 중 실제 open-gripper action과 observation을 계속 반영한다.
+- paper에는 warmup/history padding이 없다. 이 값은 OpenVLA-style 데이터
+  재생성 protocol과 online tensor contract를 맞추기 위한 재현 선택이다.
 
 ### E04. replanning 간격
 
@@ -351,7 +362,7 @@ Stage 2 checkpoint는 이 artifact를 내장하지 않고 size와 SHA-256으로 
 
 ### E05. 종료와 성공 판정
 
-- policy action 기준 최대 600 steps이며 5개 warmup step은 이 수치에 포함하지
+- policy action 기준 최대 600 steps이며 10개 warmup step은 이 수치에 포함하지
   않는다.
 - action은 environment 전달 전 `[-1,1]`로 clip한다.
 - reward가 양수이거나 environment `check_success()`가 참이면 성공으로 종료한다.
@@ -363,8 +374,9 @@ Stage 2 checkpoint는 이 artifact를 내장하지 않고 size와 SHA-256으로 
 - **현재 기본값**: 같은 task의 rollout을 `num_envs=4`인 synchronous
   `SubprocVectorEnv` wave로 실행한다. 하나의 부모 process만 GPU의 DecisionNCE와
   CLaD policy를 소유하고 observation/action inference를 batch 처리한다.
-- environment seed, initial-state ID, history와 diffusion generator는 episode별로
-  독립이다. 종료한 slot은 다음 vector step과 policy batch에서 제거한다.
+- environment seed는 모든 slot에서 0으로 고정하고, initial-state ID, history와
+  diffusion generator는 episode별로 독립이다. 종료한 slot은 다음 vector step과
+  policy batch에서 제거한다.
 - `num_envs`는 metric 정의가 아니라 실행 protocol이지만 batched GPU 연산의
   부동소수점 차이를 추적할 수 있도록 run identity에 포함한다.
 - `num_envs=1`은 `DummyVectorEnv`를 사용하는 reference/debug 경로다.
@@ -413,7 +425,11 @@ checkpoint, JSONL logging과 같은 항목은 재현 안정성에는 중요하�
 ## 9. 아직 자동화하지 않은 논문 실험
 
 - top-3 checkpoint 자동 보존, validation 및 선정;
-- proprio-only, semantic-only, policy-only conditioning ablation;
+- proprio-only and semantic-only conditioning ablations;
+- Policy-only is implemented as a trainable current-observation encoder plus
+  the unchanged Stage 2 diffusion U-Net; its author-side encoder architecture
+  is not reported, so the implementation remains a controlled reproduction
+  assumption until evaluated;
 - reconstruction loss 제거 ablation;
 - symmetric/reversed cross-attention ablation;
 - action-free/heavy-mask/curriculum ablation;

@@ -8,6 +8,7 @@ from clad.data.feature_cache import (
     FeatureCacheSpec,
 )
 from clad.data.libero_dataset import LiberoDatasetConfig, LiberoWindowDataset
+from clad.data.libero_rerender import LiberoRerenderConfig, rerender_task_file
 from clad.data.task_registry import LiberoTask, discover_libero_tasks
 
 __all__ = [
@@ -17,8 +18,10 @@ __all__ = [
     "DecisionNCEFeatureCacheBuilder",
     "FeatureCacheSpec",
     "LiberoDatasetConfig",
+    "LiberoRerenderConfig",
     "LiberoTask",
     "LiberoWindowDataset",
     "compute_libero_action_bounds",
     "discover_libero_tasks",
+    "rerender_task_file",
 ]

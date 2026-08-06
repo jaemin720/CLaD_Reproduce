@@ -19,7 +19,7 @@ Examples:
 
 Optional path overrides:
   CLAD_STAGE2_CHECKPOINT
-  CLAD_FORESIGHT_CHECKPOINT
+  CLAD_FORESIGHT_CHECKPOINT (required only by CLaD checkpoints)
   CLAD_DECISIONNCE_CACHE_DIR
   CLAD_LIBERO_CONFIG_DIR
   CLAD_EVAL_OUTPUT_DIR
@@ -44,18 +44,17 @@ if [[ ! "$CLAD_GPU_ID" =~ ^[0-9]+$ ]]; then
 fi
 
 CLAD_PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CLAD_STAGE2_CHECKPOINT="${CLAD_STAGE2_CHECKPOINT:-$CLAD_PROJECT_DIR/outputs/clad_stage2/stage2_latest.pt}"
-CLAD_FORESIGHT_CHECKPOINT="${CLAD_FORESIGHT_CHECKPOINT:-$CLAD_PROJECT_DIR/outputs/clad_stage1/stage1_foresight.pt}"
+CLAD_STAGE2_CHECKPOINT="${CLAD_STAGE2_CHECKPOINT:-$CLAD_PROJECT_DIR/outputs/clad_stage2_official/stage2_latest.pt}"
+CLAD_FORESIGHT_CHECKPOINT="${CLAD_FORESIGHT_CHECKPOINT:-$CLAD_PROJECT_DIR/outputs/clad_stage1_official/stage1_foresight.pt}"
 CLAD_DECISIONNCE_CACHE_DIR="${CLAD_DECISIONNCE_CACHE_DIR:-$CLAD_PROJECT_DIR/.cache/decisionnce/libero_long}"
 CLAD_LIBERO_CONFIG_DIR="${CLAD_LIBERO_CONFIG_DIR:-$CLAD_PROJECT_DIR/.cache/libero}"
-CLAD_EVAL_OUTPUT_DIR="${CLAD_EVAL_OUTPUT_DIR:-$CLAD_PROJECT_DIR/outputs/clad_evaluation}"
+CLAD_EVAL_OUTPUT_DIR="${CLAD_EVAL_OUTPUT_DIR:-$CLAD_PROJECT_DIR/outputs/clad_evaluation_official}"
 CLAD_PYTHON="${CLAD_PYTHON:-python}"
 
 cd "$CLAD_PROJECT_DIR"
 
 for required_file in \
   "$CLAD_STAGE2_CHECKPOINT" \
-  "$CLAD_FORESIGHT_CHECKPOINT" \
   "$CLAD_DECISIONNCE_CACHE_DIR/manifest.json" \
   "$CLAD_LIBERO_CONFIG_DIR/config.yaml"; do
   if [[ ! -f "$required_file" ]]; then
@@ -66,7 +65,7 @@ done
 
 mkdir -p "$CLAD_EVAL_OUTPUT_DIR"
 
-echo "CLaD LIBERO evaluation launcher"
+echo "Diffusion policy LIBERO evaluation launcher"
 echo "  physical_gpu=$CLAD_GPU_ID -> torch_device=cuda:0"
 echo "  checkpoint=$CLAD_STAGE2_CHECKPOINT"
 echo "  output=$CLAD_EVAL_OUTPUT_DIR"

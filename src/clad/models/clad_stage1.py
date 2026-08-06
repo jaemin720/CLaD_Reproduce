@@ -35,6 +35,7 @@ from clad.models.clad_transition import (
     CLaDTransitionOutput,
     CrossAttentionConfig,
 )
+from clad.proprioception import LEGACY_ROBOT_STATE
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,8 +112,13 @@ class CLaDStage1Config:
         for name, value in nested.items():
             if not isinstance(value, Mapping):
                 raise TypeError(f"Checkpoint model_config[{name!r}] must be a mapping")
+        checkpoint_inputs = dict(nested["inputs"])
+        # Historical checkpoints predate the named contract and always used
+        # the 9D EEF-based robot_states vector. Do not reinterpret them using
+        # the new official-LIBERO default merely because the width is also 9.
+        checkpoint_inputs.setdefault("proprioception", LEGACY_ROBOT_STATE)
         return cls(
-            inputs=CLaDInputEncoderConfig(**dict(nested["inputs"])),
+            inputs=CLaDInputEncoderConfig(**checkpoint_inputs),
             attention=CrossAttentionConfig(**dict(nested["attention"])),
             foresight=ForesightConfig(**dict(nested["foresight"])),
         )

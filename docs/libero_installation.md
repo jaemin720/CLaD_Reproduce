@@ -307,8 +307,8 @@ physical GPU 1은 프로세스 내부의 `cuda:0`으로 보인다.
 ```bash
 CUDA_VISIBLE_DEVICES=1 MUJOCO_GL=egl \
 python scripts/evaluate_clad_libero.py \
-  --checkpoint outputs/clad_stage2/stage2_latest.pt \
-  --foresight-checkpoint outputs/clad_stage1/stage1_foresight.pt \
+  --checkpoint outputs/clad_stage2_official/stage2_latest.pt \
+  --foresight-checkpoint outputs/clad_stage1_official/stage1_foresight.pt \
   --cache-dir .cache/decisionnce/libero_long \
   --output-dir outputs/clad_evaluation_smoke \
   --device cuda:0 \

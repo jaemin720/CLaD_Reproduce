@@ -1,0 +1,33 @@
+# Policy-only ablation with external and wrist-camera DecisionNCE features.
+# Each view is encoded independently by frozen DecisionNCE, then the two
+# features are mean-fused before language FiLM and the trainable semantic MLP.
+conditioning:
+  vision_feature_dim: 1024
+  text_feature_dim: 1024
+  proprio_dim: 9
+  proprioception: libero_joint_gripper
+  action_dim: 7
+  hidden_dim: 1024
+  horizon: 6
+  mlp_hidden_dim: 1024
+  dropout: 0.0
+  view_fusion: mean
+  camera_views:
+    - agentview_rgb
+    - eye_in_hand_rgb
+
+# Identical to the single-view Policy-only diffusion model.
+diffusion:
+  action_dim: 7
+  horizon: 6
+  condition_dim_per_modality: 1024
+  diffusion_step_embed_dim: 256
+  down_dims: [512, 1024, 1536]
+  kernel_size: 5
+  num_groups: 8
+  condition_predict_scale: true
+  num_train_timesteps: 100
+  beta_schedule: squaredcos_cap_v2
+  cosine_s: 0.008
+  max_beta: 0.999
+  clip_sample: true

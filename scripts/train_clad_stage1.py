@@ -19,6 +19,7 @@ from clad.data import (
     LiberoWindowDataset,
 )
 from clad.models import CLaDStage1Config, CLaDStage1Model
+from clad.proprioception import proprioception_spec
 from clad.training import (
     Stage1MetricLogger,
     Stage1Trainer,
@@ -52,7 +53,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path(".cache/decisionnce/libero_long"),
     )
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs/clad_stage1"))
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("outputs/clad_stage1_official"),
+    )
     parser.add_argument("--file-pattern")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--resume", type=Path)
@@ -166,6 +171,18 @@ def main() -> None:
     device = _resolve_device(args.device)
     generator = Stage1Trainer.seed_everything(trainer_config.seed)
     base_dataset = LiberoWindowDataset(dataset_config)
+    if dataset_config.proprioception != model_config.inputs.proprioception:
+        raise ValueError(
+            "Stage 1 model and dataset proprioception contracts must match: "
+            f"model={model_config.inputs.proprioception!r}, "
+            f"dataset={dataset_config.proprioception!r}"
+        )
+    proprio_dim = proprioception_spec(dataset_config.proprioception).dimension
+    if proprio_dim != model_config.inputs.proprio_dim:
+        raise ValueError(
+            "Stage 1 proprioception dimension does not match the model: "
+            f"contract={proprio_dim}, model={model_config.inputs.proprio_dim}"
+        )
     dataset = CachedLiberoWindowDataset(
         base_dataset=base_dataset,
         feature_cache=DecisionNCEFeatureCache(args.cache_dir),

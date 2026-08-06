@@ -14,8 +14,8 @@ artifacts/
 checkpoints/
 outputs/
 wandb/
+MUJOCO_LOG.TXT
 
 *.ckpt
 *.pt
 *.pth
-

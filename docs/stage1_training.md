@@ -193,6 +193,11 @@ shell script를 실행하는 것이 가장 간단하다.
 ./scripts/train_stage1.sh
 ```
 
+신규 기본 출력은 `outputs/clad_stage1_official`이다. 기존
+`outputs/clad_stage1`은 EEF 기반 `robot_states` checkpoint를 보존하기 위해
+덮어쓰지 않는다. 새 공식 joint+gripper 계약은 tensor width가 같아도 의미가
+다르므로 기존 checkpoint에서 resume할 수 없다.
+
 이 script는 아래 Python 명령을 실행하면서 콘솔 출력을 자동으로 저장한다.
 
 ```bash
@@ -202,7 +207,7 @@ python scripts/train_clad_stage1.py \
   --train-config configs/train/stage1.yaml \
   --dataset-dir "$LIBERO_DATASET_DIR" \
   --cache-dir .cache/decisionnce/libero_long \
-  --output-dir outputs/clad_stage1 \
+  --output-dir outputs/clad_stage1_official \
   --device cuda
 ```
 
@@ -233,9 +238,9 @@ ETA는 성공한 optimizer step의 소요 시간을 지수 이동 평균으로 �
 
 전체 수치는 다음 파일에 보존된다.
 
-- `outputs/clad_stage1/train_console.log`: 오류를 포함한 전체 콘솔 출력
-- `outputs/clad_stage1/train_metrics.jsonl`: 손실과 모든 진단 metric
-- `outputs/clad_stage1/run_config_<run-id>.json`: 실행별 resolved 설정
+- `outputs/clad_stage1_official/train_console.log`: 오류를 포함한 전체 콘솔 출력
+- `outputs/clad_stage1_official/train_metrics.jsonl`: 손실과 모든 진단 metric
+- `outputs/clad_stage1_official/run_config_<run-id>.json`: 실행별 resolved 설정
 
 `train_console.log`와 `train_metrics.jsonl`은 이어 쓰며, 각 JSONL record에는
 실행을 구분하는 `run_id`와 UTC 시간이 포함된다. JSONL에는 다음 항목이
@@ -256,7 +261,7 @@ ETA는 성공한 optimizer step의 소요 시간을 지수 이동 평균으로 �
 기본 설정은 1,000 step마다 다음 파일을 원자적으로 교체한다.
 
 ```text
-outputs/clad_stage1/stage1_latest.pt
+outputs/clad_stage1_official/stage1_latest.pt
 ```
 
 체크포인트에는 다음 상태가 포함된다.
@@ -273,7 +278,7 @@ outputs/clad_stage1/stage1_latest.pt
 
 ```bash
 ./scripts/train_stage1.sh \
-  --resume outputs/clad_stage1/stage1_latest.pt
+  --resume outputs/clad_stage1_official/stage1_latest.pt
 ```
 
 동일한 동작을 Python 명령으로 직접 실행할 수도 있다.
@@ -285,9 +290,9 @@ python scripts/train_clad_stage1.py \
   --train-config configs/train/stage1.yaml \
   --dataset-dir "$LIBERO_DATASET_DIR" \
   --cache-dir .cache/decisionnce/libero_long \
-  --output-dir outputs/clad_stage1 \
+  --output-dir outputs/clad_stage1_official \
   --device cuda \
-  --resume outputs/clad_stage1/stage1_latest.pt
+  --resume outputs/clad_stage1_official/stage1_latest.pt
 ```
 
 재개할 때 dataset, file pattern, batch size와 seed를 변경하면 안 된다. 이 값이
@@ -329,7 +334,7 @@ fp16 gradient에 `inf` 또는 `nan`이 감지되어 AMP scaler가 optimizer upda
 - 전체 10-task cache fingerprint 검증 통과
 - 25,000 optimizer steps 완료
 - 최종 loss가 유한하고 장기간 AMP skip이 반복되지 않음
-- `outputs/clad_stage1/stage1_latest.pt` 저장 확인
+- `outputs/clad_stage1_official/stage1_latest.pt` 저장 확인
 - 동일 설정으로 checkpoint load 및 inference forward 통과
 
 다음 단계에서는 이 체크포인트의 CLaD를 고정하고, 예측된 latent foresight를

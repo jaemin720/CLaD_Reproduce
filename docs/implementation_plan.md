@@ -160,8 +160,10 @@ and rejects different frozen weights.
 - [x] same-task subprocess vector environments with batched DecisionNCE/policy inference;
 - [x] per-episode history and diffusion RNG streams independent of vector batch order;
 - [x] resumable per-episode JSONL, task-level success metrics, and videos;
+- [x] Policy-only current-observation diffusion baseline;
+- [x] controlled two-view Policy-only cache/train/evaluation path;
 - [ ] top-3 checkpoint retention/selection automation;
-- [ ] modality, reconstruction, and attention ablations.
+- [ ] proprio-only, semantic-only, reconstruction, and attention ablations.
 
 The default evaluation protocol follows the paper's single-checkpoint 50-rollout
 setting. The paper also reports a top-3-checkpoint average with 20 rollouts per
@@ -170,3 +172,23 @@ evaluate any retained checkpoint with 20 rollouts; automated selection remains
 future work. The paper likewise does not state how many actions from each
 six-action sample are executed before replanning. Executing all six is the
 documented default, while per-step replanning remains configurable.
+
+## 5. Reproduction diagnosis — in progress
+
+The first controlled diagnostic is the Policy-only baseline documented in
+[`policy_only_baseline.md`](policy_only_baseline.md). It removes the Stage 1
+artifact, temporal transition encoders, and latent foresight while retaining
+the same cached DecisionNCE features, action data, diffusion U-Net, trainer,
+EMA, and evaluator. Its observation encoders are trained jointly with the
+policy and its checkpoint records `policy_variant=policy_only`.
+
+The data and rollout contract now uses the official LIBERO policy ordering of
+seven joint positions followed by two gripper positions. Historical
+checkpoints remain explicitly tagged as the EEF-based `robot_states` legacy
+contract and cannot be silently resumed on the new data. DecisionNCE caches do
+not require regeneration because they contain only image and text features.
+
+The next controlled diagnostic is to retrain the single-view Policy-only model
+under this official proprioception contract. After that result is fixed, the
+prepared two-view run changes only `agentview` versus `agentview + eye_in_hand`
+while retaining the same state, diffusion, and optimization settings.

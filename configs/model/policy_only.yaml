@@ -1,0 +1,35 @@
+# Diagnostic ablation corresponding to the paper's "Policy-only" row.
+#
+# Frozen DecisionNCE supplies the current visual and language features, but no
+# Stage 1 checkpoint, transition history, latent dynamics, or foresight is
+# used. Both observation MLPs and the diffusion denoiser are trained jointly.
+conditioning:
+  vision_feature_dim: 1024
+  text_feature_dim: 1024
+  proprio_dim: 9
+  proprioception: libero_joint_gripper
+  action_dim: 7
+  hidden_dim: 1024
+  horizon: 6
+  mlp_hidden_dim: 1024
+  dropout: 0.0
+  view_fusion: mean
+  camera_views:
+    - agentview_rgb
+
+# Kept identical to configs/model/clad_stage2.yaml so conditioning is the only
+# intended model difference in this controlled baseline.
+diffusion:
+  action_dim: 7
+  horizon: 6
+  condition_dim_per_modality: 1024
+  diffusion_step_embed_dim: 256
+  down_dims: [512, 1024, 1536]
+  kernel_size: 5
+  num_groups: 8
+  condition_predict_scale: true
+  num_train_timesteps: 100
+  beta_schedule: squaredcos_cap_v2
+  cosine_s: 0.008
+  max_beta: 0.999
+  clip_sample: true

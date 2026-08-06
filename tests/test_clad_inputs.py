@@ -10,6 +10,7 @@ from clad.models import (
     ProprioStateEncoder,
     SemanticStateEncoder,
 )
+from clad.proprioception import LIBERO_JOINT_GRIPPER
 
 
 def _config(**overrides: object) -> CLaDInputEncoderConfig:
@@ -37,6 +38,7 @@ def test_paper_default_dimensions() -> None:
     assert config.num_semantic_tokens == 4
     assert config.horizon == 6
     assert config.action_mask_ratio == 0.3
+    assert config.proprioception == LIBERO_JOINT_GRIPPER
 
 
 def test_semantic_encoder_accepts_cached_dtype_and_expandable_views() -> None:

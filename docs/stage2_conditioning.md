@@ -54,8 +54,8 @@ conda activate clad
 cd /path/to/CLaD_Reproduce
 
 python scripts/export_stage1_foresight.py \
-  --source outputs/clad_stage1/stage1_latest.pt \
-  --output outputs/clad_stage1/stage1_foresight.pt
+  --source outputs/clad_stage1_official/stage1_latest.pt \
+  --output outputs/clad_stage1_official/stage1_foresight.pt
 ```
 
 The command is atomic and refuses to replace an existing output unless
@@ -72,7 +72,7 @@ import torch
 from clad.models import CLaDForesightBackbone
 
 backbone = CLaDForesightBackbone.from_checkpoint(
-    "outputs/clad_stage1/stage1_foresight.pt",
+    "outputs/clad_stage1_official/stage1_foresight.pt",
     device="cuda",
     dtype=torch.float16,
 )
